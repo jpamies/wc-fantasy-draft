@@ -1,0 +1,234 @@
+# Decisiones Técnicas (ADRs) — WC Fantasy 2026
+
+> Registro de decisiones de arquitectura. Cada decisión incluye contexto,
+> opciones evaluadas, y justificación.
+
+---
+
+## ADR-001: Frontend sin framework (Vanilla JS)
+
+**Estado**: Aceptada  
+**Fecha**: 2026-04-20
+
+### Contexto
+Necesitamos una webapp interactiva con varias vistas (draft, equipo, mercado, liga).
+Tenemos experiencia previa con `world-cup-list` que usa vanilla HTML/CSS/JS.
+
+### Opciones evaluadas
+
+| Opción | Pros | Contras |
+|---|---|---|
+| **Vanilla JS** | Sin build step, despliegue trivial, DOM API nativa | Sin routing SPA built-in, gestión de estado manual |
+| React/Next.js | Ecosistema maduro, componentes reutilizables | Build tooling pesado, overkill para el MVP |
+| Svelte | Ligero, compilado, reactivo | Ecosistema menor, dependencia de bundler |
+| Preact | React-compatible, 3KB | Necesita build step |
+
+### Decisión
+**Vanilla JS** con routing basado en hash (`#/draft`, `#/team`, etc.) y un mini-framework
+de componentes casero (render functions que devuelven strings HTML).
+
+### Consecuencias
+- (+) Zero dependencies, deploy como estáticos
+- (+) Coherencia con world-cup-list
+- (-) Si la UI crece mucho, evaluar migración a Preact/Svelte
+- (-) No hay hot-reload nativo (usar Live Server de VS Code)
+
+### Revisión
+Si al terminar la Fase 2 (draft) la complejidad del frontend resulta inmanejable,
+migrar a Preact manteniendo la misma estructura de archivos.
+
+---
+
+## ADR-002: Backend con Python (FastAPI)
+
+**Estado**: Aceptada  
+**Fecha**: 2026-04-20
+
+### Contexto
+Necesitamos una API REST con soporte para WebSocket (draft en vivo),
+integración con fuentes de datos externas (scraping), y evolución de base de datos.
+
+### Opciones evaluadas
+
+| Opción | Pros | Contras |
+|---|---|---|
+| **FastAPI (Python)** | Async, auto-docs, WebSocket, experiencia con transfermarkt-api | GIL para CPU-bound (no aplica aquí) |
+| Express (Node.js) | JS en todo el stack | Menos tipado, más boilerplate para validación |
+| Go (net/http) | Rendimiento, binario único | Más verboso, sin auto-docs, no necesitamos ese rendimiento |
+| Flask (Python) | Simple, muy conocido | Sin async nativo, sin WebSocket built-in |
+
+### Decisión
+**FastAPI** con Pydantic para modelos, `uvicorn` como servidor ASGI.
+
+### Consecuencias
+- (+) WebSocket nativo para el draft
+- (+) OpenAPI auto-generado (útil para frontend)
+- (+) Scripts de scraping en el mismo lenguaje
+- (-) Dependencia de Python en el servidor
+
+---
+
+## ADR-003: Base de datos con evolución progresiva (JSON → SQLite → PostgreSQL)
+
+**Estado**: Aceptada  
+**Fecha**: 2026-04-20
+
+### Contexto
+Queremos empezar rápido reutilizando los JSON de `world-cup-list`, pero el fantasy
+necesita relaciones complejas (ligas, equipos, traspasos, historial de puntos).
+
+### Opciones evaluadas
+
+| Opción | Pros | Contras |
+|---|---|---|
+| **JSON → SQLite → Postgres** | Evolución gradual, sin setup inicial | Requiere capa de abstracción |
+| PostgreSQL desde el inicio | Potente, escalable | Overhead de setup para MVP |
+| MongoDB | Flexible, JSON nativo | Consultas relacionales pobres |
+| Solo JSON files | Sin dependencias | No escala, sin transacciones |
+
+### Decisión
+Patrón **Repository** que abstrae el almacenamiento. Tres implementaciones:
+1. `JsonStore` — lee/escribe JSON files (MVP)
+2. `SqliteStore` — SQLite con schema migrations (beta)
+3. `PostgresStore` — PostgreSQL vía `asyncpg` (producción)
+
+### Consecuencias
+- (+) MVP funcional en horas, sin setup de BD
+- (+) Migración transparente para el resto del código
+- (-) Mantener 2-3 implementaciones del store
+- (-) JsonStore no soporta concurrencia real (aceptable para MVP)
+
+---
+
+## ADR-004: Autenticación simplificada (v1) vs OAuth (v2)
+
+**Estado**: Aceptada  
+**Fecha**: 2026-04-20
+
+### Contexto
+El MVP necesita identificar participantes dentro de una liga sin fricción.
+No hay pagos reales — la seguridad requerida es baja.
+
+### Decisión
+
+**v1 (MVP)**: Código de liga + nickname
+- El comisionado crea una liga → recibe un código de 6 caracteres
+- Los participantes se unen con el código + eligen un nickname
+- Se genera un token de sesión (JWT sin expiración corta) almacenado en localStorage
+- Sin passwords, sin emails, sin PII
+
+**v2 (post-MVP)**: OAuth con GitHub y Google
+- Login social para persistencia entre dispositivos
+- Vinculación de cuenta con ligas existentes
+
+### Consecuencias
+- (+) Cero fricción para el usuario en v1
+- (+) Sin gestión de passwords ni emails
+- (-) Si pierdes el localStorage, pierdes el acceso al equipo
+- Mitigación: endpoint de "recuperar equipo" por código de liga + nickname exacto
+
+---
+
+## ADR-005: Puntuación basada en fuentes externas
+
+**Estado**: Aceptada  
+**Fecha**: 2026-04-20
+
+### Contexto
+La puntuación del fantasy se basa en el rendimiento real de los jugadores.
+Necesitamos una fuente fiable de datos de partidos.
+
+### Opciones evaluadas
+
+| Fuente | Pros | Contras |
+|---|---|---|
+| **SofaScore API** | Ratings detallados, stats por jugador | API no oficial, puede cambiar |
+| Transfermarkt | Ya integrado en world-cup-list | No tiene stats de partido en vivo |
+| Football-Data.org | API oficial, gratuita | Stats limitadas (goles, tarjetas) |
+| Combinación | Lo mejor de cada fuente | Más complejidad |
+
+### Decisión
+**Enfoque por capas**:
+1. **Base**: Football-Data.org o API-Football para eventos del partido (goles, tarjetas, sustituciones)
+2. **Enriquecimiento**: SofaScore para ratings detallados y stats avanzadas
+3. **Fallback**: Entrada manual por el comisionado si las APIs fallan
+
+### Consecuencias
+- (+) No dependemos de una sola fuente
+- (+) Entrada manual como red de seguridad
+- (-) Más lógica de reconciliación de datos
+
+---
+
+## ADR-006: Draft con WebSocket
+
+**Estado**: Aceptada  
+**Fecha**: 2026-04-20
+
+### Contexto
+El draft requiere turnos en tiempo real: todos los participantes ven quién elige,
+el timer corre, y cuando alguien pickea, todos se actualizan instantáneamente.
+
+### Decisión
+**WebSocket** para la sala de draft con fallback a polling.
+
+Protocolo:
+```
+Server → Client:
+  { "type": "turn",       "player": "user123", "timeLeft": 60 }
+  { "type": "pick",       "player": "user456", "picked": { "id": 42, "name": "..." } }
+  { "type": "draft_end",  "results": [...] }
+
+Client → Server:
+  { "type": "pick",       "playerId": 42 }
+  { "type": "auto_pick",  "preferences": ["FWD", "MID"] }
+```
+
+### Consecuencias
+- (+) Experiencia en tiempo real, fluida
+- (+) FastAPI soporta WebSocket nativamente
+- (-) Más complejidad que REST puro
+- (-) Necesita gestión de reconexión
+
+---
+
+## ADR-007: Monorepo con frontend y backend juntos
+
+**Estado**: Aceptada  
+**Fecha**: 2026-04-20
+
+### Contexto
+¿Separar frontend y backend en repos distintos o mantenerlos juntos?
+
+### Decisión
+**Monorepo** — todo en `wc-fanasy/` con carpetas separadas (`src/frontend/`, `src/backend/`).
+
+### Consecuencias
+- (+) Un solo repo, un solo PR, una sola verdad
+- (+) Scripts compartidos, Makefile unificado
+- (+) Más fácil para un equipo pequeño (1-3 personas)
+- (-) Deploys acoplados (mitigable con CI condicional)
+
+---
+
+## ADR-008: Moneda virtual para el mercado de traspasos
+
+**Estado**: Aceptada  
+**Fecha**: 2026-04-20
+
+### Contexto
+El mercado de traspasos necesita una economía interna. ¿Cómo manejar el "dinero"
+para clausulazos y pujas?
+
+### Decisión
+**Moneda virtual** (WC Coins / Fantasillones) con estas reglas:
+- Cada equipo empieza con un **presupuesto fijo** (ej: 500M fantasillones)
+- El valor de la cláusula de cada jugador se basa en su **valor de mercado real** (Transfermarkt)
+- Los traspasos negociados pueden incluir jugadores + moneda
+- El presupuesto se recalcula al vender/comprar
+
+### Consecuencias
+- (+) Añade estrategia al juego
+- (+) Basado en datos reales (valor de mercado)
+- (-) Necesita balanceo para que no sea P2W (pay-to-win con mejor conocimiento)
+- Mitigación: todos empiezan con el mismo presupuesto, cláusulas transparentes
