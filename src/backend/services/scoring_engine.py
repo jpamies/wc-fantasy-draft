@@ -123,3 +123,92 @@ class ScoringEngine:
             return results
         finally:
             await db.close()
+
+    @staticmethod
+    async def get_team_matchday_points(team_id: str, matchday_id: str) -> int:
+        """Calculate a team's points for a matchday with auto-substitution."""
+        db = await get_db()
+        try:
+            # Get all team players with their roles
+            roster = await db.execute_fetchall(
+                """SELECT tp.player_id, tp.is_starter, tp.is_captain, tp.is_vice_captain,
+                          p.position
+                   FROM team_players tp JOIN players p ON tp.player_id = p.id
+                   WHERE tp.team_id=?""",
+                (team_id,),
+            )
+            starters = [dict(r) for r in roster if r["is_starter"]]
+            bench = [dict(r) for r in roster if not r["is_starter"]]
+
+            # Get scores for all team players this matchday
+            player_ids = [r["player_id"] for r in roster]
+            if not player_ids:
+                return 0
+            placeholders = ",".join("?" * len(player_ids))
+            scores = await db.execute_fetchall(
+                f"SELECT player_id, total_points, minutes_played FROM match_scores WHERE matchday_id=? AND player_id IN ({placeholders})",
+                (matchday_id, *player_ids),
+            )
+            score_map = {dict(s)["player_id"]: dict(s) for s in scores}
+
+            # Auto-substitution: replace starters with 0 min from bench
+            subs_used = 0
+            max_subs = 3
+            active = []
+            for s in starters:
+                sc = score_map.get(s["player_id"])
+                if sc and sc["minutes_played"] > 0:
+                    active.append(s)
+                elif subs_used < max_subs:
+                    # Find bench player of same position
+                    sub = None
+                    for b in bench:
+                        b_score = score_map.get(b["player_id"])
+                        if b_score and b_score["minutes_played"] > 0 and b["position"] == s["position"]:
+                            sub = b
+                            break
+                    if not sub:
+                        # Try any bench player that played
+                        for b in bench:
+                            b_score = score_map.get(b["player_id"])
+                            if b_score and b_score["minutes_played"] > 0:
+                                sub = b
+                                break
+                    if sub:
+                        sub["is_captain"] = s.get("is_captain", 0)
+                        sub["is_vice_captain"] = s.get("is_vice_captain", 0)
+                        active.append(sub)
+                        bench.remove(sub)
+                        subs_used += 1
+                    else:
+                        active.append(s)  # No sub available, keep (0 pts)
+                else:
+                    active.append(s)  # Max subs reached
+
+            # Calculate total points
+            total = 0
+            captain_id = None
+            vice_captain_id = None
+            for p in active:
+                if p.get("is_captain"):
+                    captain_id = p["player_id"]
+                if p.get("is_vice_captain"):
+                    vice_captain_id = p["player_id"]
+
+            # Determine who gets captain bonus
+            cap_bonus_id = None
+            if captain_id and score_map.get(captain_id, {}).get("minutes_played", 0) > 0:
+                cap_bonus_id = captain_id
+            elif vice_captain_id and score_map.get(vice_captain_id, {}).get("minutes_played", 0) > 0:
+                cap_bonus_id = vice_captain_id
+
+            for p in active:
+                sc = score_map.get(p["player_id"])
+                pts = sc["total_points"] if sc else 0
+                if p["player_id"] == cap_bonus_id:
+                    pts *= 2  # Captain multiplier
+                total += pts
+
+            return total
+        finally:
+            await db.close()

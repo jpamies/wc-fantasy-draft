@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
 COPY data/transfermarkt/ data/transfermarkt/
+COPY data/tournament/ data/tournament/
 
 # Create data directory for SQLite
 RUN mkdir -p data

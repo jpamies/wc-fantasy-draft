@@ -143,34 +143,23 @@ async def get_league(league_id: str):
 
 @router.get("/leagues/{league_id}/standings", response_model=list[StandingEntry])
 async def get_standings(league_id: str):
+    from src.backend.services.scoring_engine import ScoringEngine
     db = await get_db()
     try:
         teams = await db.execute_fetchall(
             "SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,)
         )
+        # Get all completed matchdays
+        matchdays = await db.execute_fetchall(
+            "SELECT id FROM matchdays WHERE status='completed'"
+        )
+
         standings = []
         for t in teams:
             t = dict(t)
-            # Sum points from all matchdays for this team's starters
-            pts_rows = await db.execute_fetchall(
-                """SELECT COALESCE(SUM(ms.total_points), 0) as pts
-                   FROM match_scores ms
-                   JOIN team_players tp ON ms.player_id = tp.player_id AND tp.team_id=?
-                   WHERE tp.is_starter=1""",
-                (t["id"],),
-            )
-            total = pts_rows[0]["pts"] if pts_rows else 0
-            # Apply captain multiplier
-            cap_rows = await db.execute_fetchall(
-                """SELECT COALESCE(SUM(ms.total_points), 0) as pts
-                   FROM match_scores ms
-                   JOIN team_players tp ON ms.player_id = tp.player_id AND tp.team_id=?
-                   WHERE tp.is_captain=1""",
-                (t["id"],),
-            )
-            cap_pts = cap_rows[0]["pts"] if cap_rows else 0
-            # Captain already counted once in total, add extra multiplier portion
-            total += cap_pts  # effectively x2
+            total = 0
+            for md in matchdays:
+                total += await ScoringEngine.get_team_matchday_points(t["id"], dict(md)["id"])
 
             standings.append(StandingEntry(
                 team_id=t["id"], team_name=t["team_name"],
