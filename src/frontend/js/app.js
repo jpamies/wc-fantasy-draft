@@ -49,11 +49,14 @@ window.clerkReady = (async function initClerk() {
     // Logout — sign out of both Clerk and our app
     document.getElementById('btn-logout').addEventListener('click', async () => {
         API.logout();
+        localStorage.removeItem('wcf_last_league_code');
+        localStorage.removeItem('wcf_display_name');
         nav.classList.add('hidden');
         if (window.Clerk?.user) {
             await window.Clerk.signOut();
         }
-        Router.navigate('#/');
+        window.location.hash = '#/';
+        window.location.reload();
     });
 
     // Start router
