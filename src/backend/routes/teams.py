@@ -67,26 +67,20 @@ async def update_lineup(team_id: str, body: LineupUpdate, auth: dict = Depends(g
             await db.execute("UPDATE fantasy_teams SET formation=? WHERE id=?", (body.formation, team_id))
 
         if body.starters is not None:
-            formation = body.formation
-            if not formation:
-                t = await db.execute_fetchall("SELECT formation FROM fantasy_teams WHERE id=?", (team_id,))
-                formation = t[0]["formation"] if t else "4-3-3"
-
-            req = FORMATIONS[formation]
-            # Validate starters count = 11
-            if len(body.starters) != 11:
-                raise HTTPException(400, "Must have exactly 11 starters")
+            if len(body.starters) > 11:
+                raise HTTPException(400, "Maximum 11 starters")
 
             # Verify all players belong to team
-            placeholders = ",".join("?" for _ in body.starters)
-            starter_rows = await db.execute_fetchall(
-                f"""SELECT tp.player_id, p.position FROM team_players tp
-                    JOIN players p ON tp.player_id=p.id
-                    WHERE tp.team_id=? AND tp.player_id IN ({placeholders})""",
-                [team_id] + body.starters,
-            )
-            if len(starter_rows) != 11:
-                raise HTTPException(400, "Some players not in your team")
+            if body.starters:
+                placeholders = ",".join("?" for _ in body.starters)
+                starter_rows = await db.execute_fetchall(
+                    f"""SELECT tp.player_id, p.position FROM team_players tp
+                        JOIN players p ON tp.player_id=p.id
+                        WHERE tp.team_id=? AND tp.player_id IN ({placeholders})""",
+                    [team_id] + body.starters,
+                )
+                if len(starter_rows) != len(body.starters):
+                    raise HTTPException(400, "Some players not in your team")
 
             # Reset all, then set starters
             await db.execute("UPDATE team_players SET is_starter=0 WHERE team_id=?", (team_id,))

@@ -44,13 +44,14 @@ Router.register('#/team', async (container) => {
     }
 
     function validateLineup() {
-        if (starterIds.size !== 11) return `Necesitas 11 titulares (tienes ${starterIds.size})`;
         const counts = getPositionCounts();
+        const warnings = [];
+        if (starterIds.size < 11) warnings.push(`${starterIds.size}/11 titulares`);
         for (const [pos, lim] of Object.entries(POS_LIMITS)) {
-            if (counts[pos] < lim.min) return `Mínimo ${lim.min} ${POS_LABELS[pos]}`;
-            if (counts[pos] > lim.max) return `Máximo ${lim.max} ${POS_LABELS[pos]}`;
+            if (counts[pos] < lim.min && starterIds.size === 11) warnings.push(`Mín ${lim.min} ${POS_LABELS[pos]}`);
+            if (counts[pos] > lim.max) warnings.push(`Máx ${lim.max} ${POS_LABELS[pos]}`);
         }
-        return null;
+        return warnings.length ? warnings.join(' · ') : null;
     }
 
     function renderPlayerChip(p, actions) {
@@ -134,6 +135,7 @@ Router.register('#/team', async (container) => {
                     </div>
                 </div>
                 ${error && starterIds.size === 11 ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem">⚠️ ${error}</div>` : ''}
+                ${error && starterIds.size < 11 ? `<div style="color:var(--accent-gold);font-size:.85rem;margin-bottom:.5rem">💡 ${error}</div>` : ''}
                 ${renderPitch(starters)}
             </div>
 
@@ -173,10 +175,10 @@ Router.register('#/team', async (container) => {
             </div>
 
             <div class="mt-2 text-center flex" style="justify-content:center;gap:1rem">
-                <button class="btn btn-gold" id="btn-save-lineup" ${error ? 'disabled' : ''}>
+                <button class="btn btn-gold" id="btn-save-lineup">
                     💾 Guardar alineación
                 </button>
-                ${starterIds.size !== 11 ? `<span style="color:var(--text-muted);font-size:.85rem">Selecciona ${11 - starterIds.size} titular(es) más</span>` : ''}
+                ${starterIds.size < 11 ? `<span style="color:var(--accent-gold);font-size:.85rem">⚡ ${11 - starterIds.size} huecos — menos puntos en jornada</span>` : ''}
             </div>
         `;
 
@@ -209,7 +211,7 @@ Router.register('#/team', async (container) => {
         document.getElementById('btn-save-lineup')?.addEventListener('click', async () => {
             const starterList = [...starterIds];
             const payload = { formation: getDetectedFormation() };
-            if (starterList.length === 11) payload.starters = starterList;
+            payload.starters = starterList;
             if (captainId) payload.captain = captainId;
             if (viceCaptainId) payload.vice_captain = viceCaptainId;
             try {
