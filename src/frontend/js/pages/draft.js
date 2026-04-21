@@ -42,6 +42,16 @@ Router.register('#/draft', async (container) => {
     function render() {
         const myTurn = state.current_team_id === API.getTeamId();
         const isDone = state.status === 'completed';
+        const myTeamId = API.getTeamId();
+        const myPicks = (state.picks || [])
+            .filter(p => p.team_id === myTeamId)
+            .map(p => ({
+                name: p.player_name,
+                player_id: p.player_id,
+                position: p.position || '?',
+                country_code: p.country_code || '',
+                club: p.club || '',
+            }));
 
         container.innerHTML = `
             <div class="flex-between mb-2">
@@ -67,8 +77,8 @@ Router.register('#/draft', async (container) => {
                 ${draftQueue.length > 0 && !autodraftEnabled ? `<div style="font-size:.8rem;color:var(--accent-teal);margin-top:.5rem">📋 Cola activa (${draftQueue.length} jugadores) — auto-pick del siguiente disponible</div>` : ''}
             </div>` : '<div class="card text-center mb-2"><p style="color:var(--accent-gold);font-size:1.2rem">🏆 Draft completado — ¡Gestiona tu equipo!</p></div>'}
 
-            <div class="grid" style="grid-template-columns: 1fr 300px 300px;">
-                <div>
+            <div class="draft-grid">
+                <div class="draft-col-main">
                     <div class="card">
                         <div class="flex-between mb-1">
                             <div class="card-header" style="margin:0">Jugadores disponibles (${availablePlayers.length})</div>
@@ -84,8 +94,7 @@ Router.register('#/draft', async (container) => {
                         </div>
                     </div>
                 </div>
-                <div>
-                <div>
+                <div class="draft-col-side">
                     <div class="card mb-2">
                         <div class="flex-between mb-1">
                             <div class="card-header" style="margin:0">📋 Cola de Draft</div>
@@ -111,7 +120,7 @@ Router.register('#/draft', async (container) => {
                             `).join('')}
                         </div>
                     </div>
-                    <div class="card">
+                    <div class="card mb-2">
                         <div class="flex-between mb-1">
                             <div class="card-header" style="margin:0">Historial de picks</div>
                             <span class="badge badge-teal">${state.picks.length} picks</span>
@@ -119,6 +128,20 @@ Router.register('#/draft', async (container) => {
                         <div class="pick-log" id="pick-log">
                             ${renderPickLog(state.picks)}
                         </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">Mi equipo (${myPicks.length}/23)</div>
+                        ${['GK','DEF','MID','FWD'].map(pos => {
+                            const pp = myPicks.filter(p => p.position === pos);
+                            if (!pp.length) return '';
+                            return `<div style="margin-bottom:.5rem">
+                                <small style="color:var(--text-muted)">${pos} (${pp.length})</small>
+                                ${pp.map(p => `<div style="font-size:.8rem;padding:.15rem 0;display:flex;align-items:center;gap:.4rem">
+                                    ${posBadge(pos)} <span>${p.name}</span> <span style="color:var(--text-muted);font-size:.75rem">${p.country_code}</span>
+                                </div>`).join('')}
+                            </div>`;
+                        }).join('')}
+                        ${myPicks.length === 0 ? '<p style="color:var(--text-muted);font-size:.85rem">Sin picks todavía</p>' : ''}
                     </div>
                 </div>
             </div>

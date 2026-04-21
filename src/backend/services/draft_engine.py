@@ -80,7 +80,8 @@ class DraftEngine:
             pick_order = json.loads(draft["pick_order"])
 
             picks = await db.execute_fetchall(
-                """SELECT dp.*, ft.team_name, p.name as player_name
+                """SELECT dp.*, ft.team_name, p.name as player_name,
+                          p.position, p.country_code, p.club, p.market_value
                    FROM draft_picks dp
                    JOIN fantasy_teams ft ON dp.team_id=ft.id
                    JOIN players p ON dp.player_id=p.id
