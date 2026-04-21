@@ -6,6 +6,10 @@ Router.register('#/', async (container) => {
         return;
     }
 
+    // Check for league code in URL: #/?code=ABC123
+    const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    const prefilledCode = (hashParams.get('code') || '').toUpperCase();
+
     container.innerHTML = `
         <div class="hero">
             <h1>⚽ WC Fantasy 2026</h1>
@@ -35,8 +39,9 @@ Router.register('#/', async (container) => {
                 <form id="form-join">
                     <div class="form-group">
                         <label>Código de la liga</label>
-                        <input type="text" id="join-code" required placeholder="ABC123" maxlength="6" style="text-transform:uppercase">
+                        <input type="text" id="join-code" required placeholder="ABC123" maxlength="6" style="text-transform:uppercase" value="${prefilledCode}">
                     </div>
+                    ${prefilledCode ? '<div style="font-size:.85rem;color:var(--accent-teal);margin-bottom:.75rem">✅ Código de liga pre-rellenado</div>' : ''}
                     <div class="form-group">
                         <label>Tu nickname</label>
                         <input type="text" id="join-nick" required placeholder="Tu nombre">

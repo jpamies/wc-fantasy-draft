@@ -21,6 +21,10 @@ async function renderLeaguePage(container) {
             <div class="card text-center">
                 <div style="font-size:.85rem;color:var(--text-secondary)">Código de liga</div>
                 <div class="league-code" id="league-code" title="Click para copiar">${league.code}</div>
+                <div class="flex mt-1" style="justify-content:center;gap:.5rem">
+                    <button class="btn btn-sm btn-outline" id="btn-copy-code">📋 Copiar código</button>
+                    <button class="btn btn-sm btn-primary" id="btn-share">📤 Compartir</button>
+                </div>
             </div>
             <div class="card text-center">
                 <div style="font-size:.85rem;color:var(--text-secondary)">Equipos</div>
@@ -70,6 +74,23 @@ async function renderLeaguePage(container) {
     document.getElementById('league-code')?.addEventListener('click', () => {
         navigator.clipboard?.writeText(league.code);
         showToast('Código copiado', 'success');
+    });
+
+    document.getElementById('btn-copy-code')?.addEventListener('click', () => {
+        navigator.clipboard?.writeText(league.code);
+        showToast('Código copiado', 'success');
+    });
+
+    document.getElementById('btn-share')?.addEventListener('click', () => {
+        const shareUrl = `${location.origin}/#/?code=${league.code}`;
+        const shareText = `⚽ Únete a mi liga de WC Fantasy 2026 "${league.name}"!\n\nCódigo: ${league.code}\n\n${shareUrl}`;
+
+        if (navigator.share) {
+            navigator.share({ title: 'WC Fantasy 2026', text: shareText, url: shareUrl }).catch(() => {});
+        } else {
+            navigator.clipboard?.writeText(shareText);
+            showToast('Enlace copiado al portapapeles', 'success');
+        }
     });
 
     document.getElementById('btn-start-draft')?.addEventListener('click', async () => {
