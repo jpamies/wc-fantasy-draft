@@ -7,6 +7,7 @@ class AuthJoin(BaseModel):
     league_code: str
     nickname: str
     team_name: str
+    display_name: str = ""
 
 class AuthRecover(BaseModel):
     league_code: str
@@ -77,6 +78,7 @@ class StandingEntry(BaseModel):
     team_id: str
     team_name: str
     owner_nick: str
+    display_name: str = ""
     total_points: int = 0
     budget: int = 0
 

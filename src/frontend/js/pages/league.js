@@ -42,7 +42,7 @@ async function renderLeaguePage(container) {
                     ${league.teams.map(t => `
                         <tr class="${t.id === API.getTeamId() ? 'rank-1' : ''}">
                             <td>${t.team_name} ${t.id === league.commissioner_team_id ? '👑' : ''}</td>
-                            <td>${t.owner_nick}</td>
+                            <td>${t.display_name || t.owner_nick}</td>
                             <td class="money">${formatMoney(t.budget)}</td>
                         </tr>
                     `).join('')}

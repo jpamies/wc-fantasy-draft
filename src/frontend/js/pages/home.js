@@ -171,6 +171,7 @@ function showCreateJoinForms(container, nickname, clerkId, prefilledCode) {
                 league_code: league.code,
                 nickname: clerkId,
                 team_name: document.getElementById('create-team').value,
+                display_name: nickname,
             });
             loginWith(auth);
             localStorage.setItem('wcf_last_league_code', league.code);
@@ -187,6 +188,7 @@ function showCreateJoinForms(container, nickname, clerkId, prefilledCode) {
                 league_code: code,
                 nickname: clerkId,
                 team_name: document.getElementById('join-team').value,
+                display_name: nickname,
             });
             loginWith(auth);
             localStorage.setItem('wcf_last_league_code', code);

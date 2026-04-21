@@ -79,8 +79,8 @@ async def join_league(body: AuthJoin):
         team_id = f"team-{uuid.uuid4().hex[:8]}"
         now = datetime.now(timezone.utc).isoformat()
         await db.execute(
-            "INSERT INTO fantasy_teams (id, league_id, owner_nick, team_name, budget, formation, created_at) VALUES (?,?,?,?,?,?,?)",
-            (team_id, league["id"], body.nickname, body.team_name, league["initial_budget"], "4-3-3", now),
+            "INSERT INTO fantasy_teams (id, league_id, owner_nick, display_name, team_name, budget, formation, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (team_id, league["id"], body.nickname, body.display_name, body.team_name, league["initial_budget"], "4-3-3", now),
         )
 
         # First team becomes commissioner
@@ -123,7 +123,7 @@ async def get_league(league_id: str):
         if not rows:
             raise HTTPException(404, "League not found")
         lg = dict(rows[0])
-        teams = await db.execute_fetchall("SELECT id, owner_nick, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,))
+        teams = await db.execute_fetchall("SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,))
         return LeagueOut(
             id=lg["id"], name=lg["name"], code=lg["code"],
             commissioner_team_id=lg["commissioner_team_id"],
@@ -146,7 +146,7 @@ async def get_standings(league_id: str):
     db = await get_db()
     try:
         teams = await db.execute_fetchall(
-            "SELECT id, owner_nick, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,)
+            "SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,)
         )
         standings = []
         for t in teams:
@@ -174,7 +174,8 @@ async def get_standings(league_id: str):
 
             standings.append(StandingEntry(
                 team_id=t["id"], team_name=t["team_name"],
-                owner_nick=t["owner_nick"], total_points=total, budget=t["budget"]
+                owner_nick=t["owner_nick"], display_name=t.get("display_name", ""),
+                total_points=total, budget=t["budget"]
             ))
         standings.sort(key=lambda x: x.total_points, reverse=True)
         return standings

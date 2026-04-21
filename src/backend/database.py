@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS fantasy_teams (
     id TEXT PRIMARY KEY,
     league_id TEXT NOT NULL REFERENCES leagues(id),
     owner_nick TEXT NOT NULL,
+    display_name TEXT DEFAULT '',
     team_name TEXT NOT NULL,
     budget INTEGER DEFAULT 500000000,
     formation TEXT DEFAULT '4-3-3',
@@ -172,6 +173,11 @@ async def init_db():
     db = await get_db()
     try:
         await db.executescript(SCHEMA)
+        # Migration: add display_name column if missing
+        try:
+            await db.execute("ALTER TABLE fantasy_teams ADD COLUMN display_name TEXT DEFAULT ''")
+        except Exception:
+            pass  # Column already exists
         await db.commit()
     finally:
         await db.close()
