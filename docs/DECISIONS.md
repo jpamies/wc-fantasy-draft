@@ -232,3 +232,49 @@ para clausulazos y pujas?
 - (+) Basado en datos reales (valor de mercado)
 - (-) Necesita balanceo para que no sea P2W (pay-to-win con mejor conocimiento)
 - Mitigación: todos empiezan con el mismo presupuesto, cláusulas transparentes
+
+---
+
+## ADR-009: SQLite por liga como estrategia de escalado
+
+**Estado**: Propuesta (no implementada)  
+**Fecha**: 2026-04-21
+
+### Contexto
+Actualmente toda la app usa un único fichero SQLite (`data/wc_fantasy.db`).
+SQLite con WAL mode soporta lecturas concurrentes ilimitadas y una escritura
+a la vez. Para el MVP (10 ligas, ~80 usuarios) es más que suficiente.
+
+Si el proyecto crece a 50+ ligas activas simultáneas, la contención de
+escritura en un solo fichero podría ser un cuello de botella.
+
+### Propuesta
+
+Separar en un SQLite compartido (catálogo read-only) + un SQLite por liga:
+
+```
+data/
+├── players.db              ← catálogo de jugadores (read-only)
+├── leagues/
+│   ├── league-abc123.db    ← equipos, draft, traspasos, scores
+│   ├── league-def456.db
+│   └── ...
+```
+
+### Ventajas
+- (+) Zero contención entre ligas
+- (+) Borrar una liga = borrar un fichero
+- (+) Backup/restore granular por liga
+- (+) Cada liga podría estar en un File Share diferente
+
+### Inconvenientes
+- (-) Más complejidad en routing de conexiones
+- (-) Queries cross-liga imposibles (ej: ranking global)
+
+### Trigger para implementar
+Cuando se detecte lentitud en escrituras concurrentes entre ligas distintas,
+o cuando haya 50+ ligas activas simultáneas.
+
+### Cambio necesario
+Solo afecta a `database.py` (cambiar path del DB según `league_id`).
+El schema SQL no cambia.
