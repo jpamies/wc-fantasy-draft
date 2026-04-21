@@ -5,7 +5,8 @@ async function renderLeaguePage(container) {
     const isComm = API.isCommissioner();
 
     localStorage.setItem('wcf_team_name', league.teams.find(t => t.id === API.getTeamId())?.team_name || '');
-    document.getElementById('nav-team-name').textContent = localStorage.getItem('wcf_team_name');
+    const displayName = localStorage.getItem('wcf_display_name') || window.getClerkUser?.()?.name || '';
+    document.getElementById('nav-team-name').textContent = displayName || localStorage.getItem('wcf_team_name');
 
     const statusLabels = {
         setup: '⚙️ Configuración', draft_pending: '📋 Draft pendiente',

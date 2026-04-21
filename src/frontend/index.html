@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WC Fantasy 2026</title>
     <link rel="stylesheet" href="css/styles.css">
+    <script
+        data-clerk-publishable-key="pk_test_Zm9uZC1zd2lmdC0zNC5jbGVyay5hY2NvdW50cy5kZXYk"
+        src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"
+        crossorigin="anonymous"
+    ></script>
 </head>
 <body>
     <nav id="main-nav" class="hidden">
@@ -18,6 +23,7 @@
             <a href="#/scoring" data-page="scoring">Puntuación</a>
         </div>
         <div class="nav-user">
+            <img id="nav-avatar" src="" alt="" style="width:28px;height:28px;border-radius:50%;display:none">
             <span id="nav-team-name"></span>
             <button id="btn-logout" class="btn btn-sm">Salir</button>
         </div>
