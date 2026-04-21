@@ -179,11 +179,19 @@ Router.register('#/team', async (container) => {
                     ${['GK','DEF','MID','FWD'].map(pos => {
                         const posPlayers = bench.filter(p => p.position === pos);
                         if (!posPlayers.length) return '';
+                        const maxForPos = pos === 'GK' ? 3 : 8;
+                        const currentInStarting = counts[pos];
+                        const positionFull = currentInStarting >= maxForPos;
+                        const teamFull = starterIds.size >= 11;
                         return `
                             <div class="pos-section"><small>${POS_LABELS[pos]}</small></div>
-                            ${posPlayers.map(p => renderPlayerChip(p, `
-                                <button class="btn btn-sm btn-primary start-btn" data-pid="${p.player_id}" title="Titular">↑</button>
-                            `)).join('')}
+                            ${posPlayers.map(p => {
+                                const disabled = positionFull || teamFull;
+                                const reason = teamFull ? 'Ya tienes 11 titulares' : positionFull ? `Máximo ${maxForPos} ${pos} como titulares` : '';
+                                return renderPlayerChip(p, `
+                                    <button class="btn btn-sm ${disabled ? 'btn-outline' : 'btn-primary'} start-btn" data-pid="${p.player_id}" title="${reason || 'Titular'}" ${disabled ? 'disabled' : ''}>↑</button>
+                                `);
+                            }).join('')}
                         `;
                     }).join('')}
                 </div>
