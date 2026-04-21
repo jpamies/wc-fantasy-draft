@@ -43,3 +43,18 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update K8s manifest with new image tag
+        run: |
+          git clone https://x-access-token:${{ secrets.K8S_REPO_TOKEN }}@github.com/jpamies/k8s-homepi.git
+          cd k8s-homepi
+          sed -i "s|image: ghcr.io/jpamies/wc-fantasy-draft:.*|image: ghcr.io/jpamies/wc-fantasy-draft:${{ github.sha }}|" apps/wc-fantasy/deployment.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/wc-fantasy/deployment.yaml
+          git diff --cached --quiet || git commit -m "deploy: wc-fantasy image ${{ github.sha }}"
+          git push
