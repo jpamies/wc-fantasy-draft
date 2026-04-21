@@ -29,10 +29,15 @@ Router.register('#/', async (container) => {
         document.getElementById('btn-clerk-login')?.addEventListener('click', async () => {
             await window.clerkReady;
             if (window.Clerk) {
-                window.Clerk.openSignIn({
-                    afterSignInUrl: window.location.href,
-                    afterSignUpUrl: window.location.href,
-                });
+                try {
+                    window.Clerk.openSignIn({
+                        afterSignInUrl: window.location.href,
+                        afterSignUpUrl: window.location.href,
+                    });
+                } catch {
+                    // Fallback: redirect to Clerk hosted sign-in page
+                    window.Clerk.redirectToSignIn({ redirectUrl: window.location.href });
+                }
             }
         });
         return;
