@@ -43,13 +43,71 @@ Router.register('#/team', async (container) => {
         return null;
     }
 
+    const POS_ORDER = {GK:0, DEF:1, MID:2, FWD:3};
+    const POS_LABELS = {GK:'Portero', DEF:'Defensa', MID:'Mediocampo', FWD:'Delantera'};
+
+    function renderPlayerChip(p, actions) {
+        return `
+            <div class="player-chip">
+                <img src="${p.photo}" alt="" onerror="this.style.display='none'">
+                <div class="player-chip-info">
+                    <div class="player-name">
+                        ${p.player_id === captainId ? '<span class="chip-badge cap">C</span>' : ''}${p.player_id === viceCaptainId ? '<span class="chip-badge vc">VC</span>' : ''}${p.name}
+                    </div>
+                    <div class="player-meta">${p.club}</div>
+                </div>
+                ${posBadge(p.position)}
+                <div class="chip-actions">${actions}</div>
+            </div>`;
+    }
+
+    function renderFormationField(starters) {
+        const req = FORMATIONS[formation];
+        const byPos = {GK:[], DEF:[], MID:[], FWD:[]};
+        starters.forEach(p => byPos[p.position].push(p));
+
+        // Render rows: FWD at top, GK at bottom (like a real pitch view)
+        const rows = ['FWD','MID','DEF','GK'];
+        return `
+            <div class="pitch">
+                ${rows.map(pos => {
+                    const players = byPos[pos];
+                    const needed = pos === 'GK' ? 1 : req[pos];
+                    const slots = [];
+                    for (let i = 0; i < needed; i++) {
+                        if (players[i]) {
+                            const p = players[i];
+                            slots.push(`
+                                <div class="pitch-player filled" title="${p.name} — ${p.club}">
+                                    <img src="${p.photo}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><rect fill=%22%23374151%22 width=%2240%22 height=%2240%22 rx=%2220%22/><text x=%2220%22 y=%2225%22 text-anchor=%22middle%22 fill=%22%239ca3af%22 font-size=%2214%22>⚽</text></svg>'">
+                                    <span class="pitch-name">${p.name.split(' ').pop()}</span>
+                                    ${p.player_id === captainId ? '<span class="pitch-badge cap">C</span>' : ''}
+                                    ${p.player_id === viceCaptainId ? '<span class="pitch-badge vc">VC</span>' : ''}
+                                </div>`);
+                        } else {
+                            slots.push(`<div class="pitch-player empty"><span class="pitch-name">${pos}</span></div>`);
+                        }
+                    }
+                    // Extra players beyond formation (overflow)
+                    for (let i = needed; i < players.length; i++) {
+                        const p = players[i];
+                        slots.push(`
+                            <div class="pitch-player filled overflow" title="${p.name} (extra)">
+                                <img src="${p.photo}" alt="" onerror="this.style.display='none'">
+                                <span class="pitch-name">${p.name.split(' ').pop()}</span>
+                            </div>`);
+                    }
+                    return `<div class="pitch-row">${slots.join('')}</div>`;
+                }).join('')}
+            </div>`;
+    }
+
     function render() {
         const starters = getStarters();
-        const bench = getBench();
+        const bench = getBench().sort((a,b) => POS_ORDER[a.position] - POS_ORDER[b.position] || b.market_value - a.market_value);
         const counts = getPositionCounts();
         const req = FORMATIONS[formation];
         const error = starterIds.size === 11 ? validateFormation() : null;
-        const isDirty = true; // always show save button
 
         container.innerHTML = `
             <div class="flex-between mb-2">
@@ -75,50 +133,50 @@ Router.register('#/team', async (container) => {
                 </div>
             </div>
 
+            <!-- Tactical field view -->
+            <div class="card mb-2">
+                <div class="flex-between mb-1">
+                    <div class="card-header" style="margin:0">Alineación táctica</div>
+                    <div style="font-size:.8rem;color:var(--text-muted)">
+                        GK: ${counts.GK}/1 · DEF: ${counts.DEF}/${req.DEF} · MID: ${counts.MID}/${req.MID} · FWD: ${counts.FWD}/${req.FWD}
+                    </div>
+                </div>
+                ${error ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem">⚠️ ${error}</div>` : ''}
+                ${renderFormationField(starters)}
+            </div>
+
             <div class="grid grid-2">
+                <!-- Starter list with actions -->
                 <div class="card">
                     <div class="card-header">Titulares (${starterIds.size}/11)</div>
-                    <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:.5rem">
-                        GK: ${counts.GK}/${1} · DEF: ${counts.DEF}/${req.DEF} · MID: ${counts.MID}/${req.MID} · FWD: ${counts.FWD}/${req.FWD}
-                    </div>
-                    ${error ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem">⚠️ ${error}</div>` : ''}
-                    ${starters.length === 0 ? '<p style="color:var(--text-muted)">Usa las flechas ↑ del banquillo para añadir titulares</p>' : ''}
+                    ${starters.length === 0 ? '<p style="color:var(--text-muted)">Usa ↑ del banquillo para añadir titulares</p>' : ''}
                     ${['GK','DEF','MID','FWD'].map(pos => {
                         const posPlayers = starters.filter(p => p.position === pos);
                         if (!posPlayers.length) return '';
                         return `
-                            <div class="mb-1"><small style="color:var(--text-muted)">${pos}</small></div>
-                            ${posPlayers.map(p => `
-                                <div class="player-card">
-                                    <img src="${p.photo}" alt="" onerror="this.style.display='none'">
-                                    <div class="player-info">
-                                        <div class="player-name">
-                                            ${p.player_id === captainId ? '🅲 ' : ''}${p.player_id === viceCaptainId ? 'VC ' : ''}${p.name}
-                                        </div>
-                                        <div class="player-meta">${p.club} · ${p.country_code}</div>
-                                    </div>
-                                    ${posBadge(p.position)}
-                                    <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="Al banquillo">↓</button>
-                                    <button class="btn btn-sm ${p.player_id === captainId ? 'btn-gold' : 'btn-outline'} cap-btn" data-pid="${p.player_id}" title="Capitán">C</button>
-                                    <button class="btn btn-sm ${p.player_id === viceCaptainId ? 'btn-primary' : 'btn-outline'} vc-btn" data-pid="${p.player_id}" title="Vice-capitán" style="font-size:.7rem">VC</button>
-                                </div>
-                            `).join('')}
+                            <div class="pos-section"><small>${POS_LABELS[pos]}</small></div>
+                            ${posPlayers.map(p => renderPlayerChip(p, `
+                                <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="Al banquillo">↓</button>
+                                <button class="btn btn-sm ${p.player_id === captainId ? 'btn-gold' : 'btn-outline'} cap-btn" data-pid="${p.player_id}" title="Capitán">C</button>
+                                <button class="btn btn-sm ${p.player_id === viceCaptainId ? 'btn-primary' : 'btn-outline'} vc-btn" data-pid="${p.player_id}" title="Vice-capitán" style="font-size:.7rem">VC</button>
+                            `)).join('')}
                         `;
                     }).join('')}
                 </div>
+
+                <!-- Bench sorted by position -->
                 <div class="card">
                     <div class="card-header">Banquillo (${bench.length})</div>
-                    ${bench.map(p => `
-                        <div class="player-card">
-                            <img src="${p.photo}" alt="" onerror="this.style.display='none'">
-                            <div class="player-info">
-                                <div class="player-name">${p.name}</div>
-                                <div class="player-meta">${p.club} · ${p.country_code}</div>
-                            </div>
-                            ${posBadge(p.position)}
-                            <button class="btn btn-sm btn-primary start-btn" data-pid="${p.player_id}" title="Titular">↑</button>
-                        </div>
-                    `).join('')}
+                    ${['GK','DEF','MID','FWD'].map(pos => {
+                        const posPlayers = bench.filter(p => p.position === pos);
+                        if (!posPlayers.length) return '';
+                        return `
+                            <div class="pos-section"><small>${POS_LABELS[pos]}</small></div>
+                            ${posPlayers.map(p => renderPlayerChip(p, `
+                                <button class="btn btn-sm btn-primary start-btn" data-pid="${p.player_id}" title="Titular">↑</button>
+                            `)).join('')}
+                        `;
+                    }).join('')}
                 </div>
             </div>
 
