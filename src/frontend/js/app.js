@@ -1,20 +1,25 @@
 /* App initialization with Clerk auth */
-(async function() {
-    // Initialize Clerk
+
+// Global promise — resolves when Clerk is fully loaded (UI included)
+window.clerkReady = (async function initClerk() {
     try {
-        if (window.Clerk) {
-            await window.Clerk.load();
-            // Listen for sign-in/sign-out to refresh the page
-            window.Clerk.addListener(({ user }) => {
-                if (user && !API.isLoggedIn()) {
-                    // Just signed in — refresh to show league forms
-                    Router.handleRoute();
-                }
-            });
+        // Wait for the Clerk script to define window.Clerk
+        for (let i = 0; i < 50 && !window.Clerk; i++) {
+            await new Promise(r => setTimeout(r, 100));
         }
+        if (!window.Clerk) return;
+        await window.Clerk.load();
+        window.Clerk.addListener(({ user }) => {
+            if (user && !API.isLoggedIn()) {
+                Router.handleRoute();
+            }
+        });
     } catch (e) {
         console.error('Clerk failed to load:', e);
     }
+})();
+
+(async function() {
 
     // Helper to get Clerk user info
     window.getClerkUser = () => {

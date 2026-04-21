@@ -26,7 +26,8 @@ Router.register('#/', async (container) => {
                 </div>
             </div>
         `;
-        document.getElementById('btn-clerk-login')?.addEventListener('click', () => {
+        document.getElementById('btn-clerk-login')?.addEventListener('click', async () => {
+            await window.clerkReady;
             if (window.Clerk) {
                 window.Clerk.openSignIn({
                     afterSignInUrl: window.location.href,
