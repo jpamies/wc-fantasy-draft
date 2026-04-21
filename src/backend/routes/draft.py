@@ -62,6 +62,10 @@ async def make_pick(league_id: str, body: DraftPickRequest, auth: dict = Depends
         "pick": result,
         "state": state,
     })
+
+    # Process any autodraft teams that are next in line
+    await _process_and_broadcast_autodraft(league_id)
+
     return result
 
 
@@ -74,7 +78,57 @@ async def auto_pick(league_id: str, auth: dict = Depends(get_current_team)):
         raise HTTPException(400, result["error"])
     state = await DraftEngine.get_draft_state(league_id)
     await _broadcast(league_id, {"type": "pick", "pick": result, "state": state})
+
+    # Process any autodraft teams that are next in line
+    await _process_and_broadcast_autodraft(league_id)
+
     return result
+
+
+@router.post("/leagues/{league_id}/draft/autodraft")
+async def toggle_autodraft(league_id: str, auth: dict = Depends(get_current_team)):
+    """Enable autodraft for the current team. The system will automatically
+    pick the best available player when it's this team's turn, ensuring
+    a balanced squad (2-3 GK, 5+ DEF, 5+ MID, 5+ FWD)."""
+    if auth["league_id"] != league_id:
+        raise HTTPException(403, "Not in this league")
+    team_id = auth["team_id"]
+    currently_enabled = DraftEngine.is_autodraft(league_id, team_id)
+    DraftEngine.set_autodraft(league_id, team_id, not currently_enabled)
+    new_state = not currently_enabled
+
+    # If just enabled and it's currently this team's turn, trigger immediately
+    if new_state:
+        await _process_and_broadcast_autodraft(league_id)
+
+    return {"ok": True, "autodraft": new_state, "team_id": team_id}
+
+
+@router.get("/leagues/{league_id}/draft/autodraft")
+async def get_autodraft_status(league_id: str, auth: dict = Depends(get_current_team)):
+    """Get autodraft status for all teams in the league."""
+    if auth["league_id"] != league_id:
+        raise HTTPException(403, "Not in this league")
+    return {
+        "team_autodraft": DraftEngine.is_autodraft(league_id, auth["team_id"]),
+        "all": DraftEngine.get_autodraft_teams(league_id),
+    }
+
+
+async def _process_and_broadcast_autodraft(league_id: str):
+    """Process autodraft picks and broadcast each one."""
+    import asyncio
+    auto_results = await DraftEngine.process_autodraft(league_id)
+    for pick in auto_results:
+        state = await DraftEngine.get_draft_state(league_id)
+        await _broadcast(league_id, {
+            "type": "pick" if state and state["status"] == "in_progress" else "draft_end",
+            "pick": pick,
+            "state": state,
+            "autodraft": True,
+        })
+        # Small delay so clients can process each pick visually
+        await asyncio.sleep(0.3)
 
 
 @router.websocket("/leagues/{league_id}/draft/ws")

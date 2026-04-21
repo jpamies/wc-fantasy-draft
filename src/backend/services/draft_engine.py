@@ -5,6 +5,13 @@ from datetime import datetime, timezone
 
 from src.backend.database import get_db
 
+# In-memory autodraft state: { league_id: { team_id: True } }
+_autodraft_teams: dict[str, dict[str, bool]] = {}
+
+# Squad composition targets for autodraft
+SQUAD_TARGETS = {"GK": (2, 3), "DEF": (5, 8), "MID": (5, 8), "FWD": (5, 8)}  # (min, max)
+SQUAD_SIZE = 23
+
 
 class DraftEngine:
 
@@ -282,3 +289,125 @@ class DraftEngine:
             return [dict(r) for r in rows]
         finally:
             await db.close()
+
+    @staticmethod
+    def set_autodraft(league_id: str, team_id: str, enabled: bool):
+        if league_id not in _autodraft_teams:
+            _autodraft_teams[league_id] = {}
+        _autodraft_teams[league_id][team_id] = enabled
+
+    @staticmethod
+    def is_autodraft(league_id: str, team_id: str) -> bool:
+        return _autodraft_teams.get(league_id, {}).get(team_id, False)
+
+    @staticmethod
+    def get_autodraft_teams(league_id: str) -> dict[str, bool]:
+        return _autodraft_teams.get(league_id, {})
+
+    @staticmethod
+    async def smart_pick(league_id: str, team_id: str) -> dict:
+        """Pick the best available player based on squad composition needs.
+
+        Strategy:
+        1. Count current squad composition by position
+        2. If any position is below its minimum, pick that position (highest value)
+        3. If all minimums are met, pick the highest value player in any position
+           that hasn't hit its maximum
+        """
+        db = await get_db()
+        try:
+            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            if not drafts:
+                return {"error": "No draft found"}
+            draft_id = drafts[0]["id"]
+
+            # Count what this team already has by position
+            team_picks = await db.execute_fetchall(
+                """SELECT p.position, COUNT(*) as cnt
+                   FROM draft_picks dp JOIN players p ON dp.player_id=p.id
+                   WHERE dp.draft_id=? AND dp.team_id=?
+                   GROUP BY p.position""",
+                (draft_id, team_id),
+            )
+            current = {"GK": 0, "DEF": 0, "MID": 0, "FWD": 0}
+            for row in team_picks:
+                current[row["position"]] = row["cnt"]
+            total_picked = sum(current.values())
+            remaining = SQUAD_SIZE - total_picked
+
+            if remaining <= 0:
+                return {"error": "Team already full"}
+
+            # Get all picked player IDs in this draft
+            all_picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
+            picked_ids = [p["player_id"] for p in all_picked]
+
+            # Calculate what positions still need filling
+            # First, figure out which positions are below minimum
+            needs = []
+            for pos, (min_req, _) in SQUAD_TARGETS.items():
+                deficit = min_req - current[pos]
+                if deficit > 0:
+                    needs.append((deficit, pos))
+
+            # Sort by biggest deficit first (ensure we fill critical gaps)
+            needs.sort(reverse=True)
+
+            # Also calculate remaining "flex" slots after minimums
+            mandatory_remaining = sum(max(0, SQUAD_TARGETS[pos][0] - current[pos]) for pos in SQUAD_TARGETS)
+            flex_slots = remaining - mandatory_remaining
+
+            # Build priority order: positions below minimum first, then any non-maxed position
+            priority_positions = [pos for _, pos in needs]
+
+            # Add positions that aren't maxed out (for flex picks)
+            for pos in ["FWD", "MID", "DEF"]:  # Prefer outfield for flex
+                if pos not in priority_positions and current[pos] < SQUAD_TARGETS[pos][1]:
+                    priority_positions.append(pos)
+            if "GK" not in priority_positions and current["GK"] < SQUAD_TARGETS["GK"][1]:
+                priority_positions.append("GK")
+
+            # Try to pick from each priority position
+            for pos in priority_positions:
+                if picked_ids:
+                    placeholders = ",".join("?" for _ in picked_ids)
+                    candidates = await db.execute_fetchall(
+                        f"SELECT id FROM players WHERE position=? AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
+                        [pos] + picked_ids,
+                    )
+                else:
+                    candidates = await db.execute_fetchall(
+                        "SELECT id FROM players WHERE position=? ORDER BY market_value DESC LIMIT 1", (pos,)
+                    )
+                if candidates:
+                    return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
+
+            return {"error": "No players available"}
+        finally:
+            await db.close()
+
+    @staticmethod
+    async def process_autodraft(league_id: str) -> list[dict]:
+        """After a pick, check if the next team(s) have autodraft enabled and pick for them.
+        Returns list of auto-picks made (for broadcasting)."""
+        results = []
+        max_iterations = 100  # safety limit
+
+        for _ in range(max_iterations):
+            state = await DraftEngine.get_draft_state(league_id)
+            if not state or state["status"] != "in_progress":
+                break
+
+            current_team = state["current_team_id"]
+            if not current_team or not DraftEngine.is_autodraft(league_id, current_team):
+                break
+
+            result = await DraftEngine.smart_pick(league_id, current_team)
+            if "error" in result:
+                # Disable autodraft if there's an error
+                DraftEngine.set_autodraft(league_id, current_team, False)
+                break
+
+            results.append(result)
+
+        return results

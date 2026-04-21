@@ -17,6 +17,13 @@ Router.register('#/draft', async (container) => {
     let pollTimer = null;
     let alive = true; // track if we're still on this page
     let lastPickCount = state.picks ? state.picks.length : 0;
+    let autodraftEnabled = false;
+
+    // Check initial autodraft status
+    try {
+        const adStatus = await API.get(`/leagues/${leagueId}/draft/autodraft`);
+        autodraftEnabled = adStatus.team_autodraft || false;
+    } catch {}
 
     async function loadAvailable() {
         const params = new URLSearchParams();
@@ -43,7 +50,13 @@ Router.register('#/draft', async (container) => {
                 <div style="font-size:.9rem;color:var(--text-secondary)">${myTurn ? '🔔 ¡ES TU TURNO!' : 'Esperando a:'}</div>
                 <div style="font-size:1.3rem;font-weight:700">${state.current_team_name || '...'}</div>
                 <div style="font-size:.85rem;color:var(--text-muted)">Pick ${state.current_pick} de ${state.pick_order.length} · Ronda ${state.current_round}/23</div>
-                ${myTurn ? '<button class="btn btn-outline btn-sm mt-1" id="btn-autopick">⚡ Auto-pick</button>' : ''}
+                <div class="flex mt-1" style="justify-content:center;gap:.5rem">
+                    ${myTurn ? '<button class="btn btn-outline btn-sm" id="btn-autopick">⚡ Auto-pick (1)</button>' : ''}
+                    <button class="btn btn-sm ${autodraftEnabled ? 'btn-gold' : 'btn-outline'}" id="btn-autodraft">
+                        🤖 AutoDraft ${autodraftEnabled ? 'ON' : 'OFF'}
+                    </button>
+                </div>
+                ${autodraftEnabled ? '<div style="font-size:.8rem;color:var(--accent-gold);margin-top:.5rem">AutoDraft activado — selección automática inteligente (2-3 GK, 5+ DEF/MID/FWD)</div>' : ''}
             </div>` : '<div class="card text-center mb-2"><p style="color:var(--accent-gold);font-size:1.2rem">🏆 Draft completado — ¡Gestiona tu equipo!</p></div>'}
 
             <div class="grid" style="grid-template-columns: 1fr 350px;">
@@ -144,6 +157,15 @@ Router.register('#/draft', async (container) => {
             try {
                 await API.post(`/leagues/${leagueId}/draft/autopick`);
                 showToast('Auto-pick realizado', 'success');
+                await refreshState();
+            } catch (err) { showToast(err.message, 'error'); }
+        });
+
+        document.getElementById('btn-autodraft')?.addEventListener('click', async () => {
+            try {
+                const res = await API.post(`/leagues/${leagueId}/draft/autodraft`);
+                autodraftEnabled = res.autodraft;
+                showToast(autodraftEnabled ? '🤖 AutoDraft activado — el sistema elegirá por ti' : 'AutoDraft desactivado', autodraftEnabled ? 'success' : 'info');
                 await refreshState();
             } catch (err) { showToast(err.message, 'error'); }
         });
