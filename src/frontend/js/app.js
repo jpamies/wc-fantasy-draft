@@ -2,7 +2,16 @@
 (async function() {
     // Initialize Clerk
     try {
-        await window.Clerk.load();
+        if (window.Clerk) {
+            await window.Clerk.load();
+            // Listen for sign-in/sign-out to refresh the page
+            window.Clerk.addListener(({ user }) => {
+                if (user && !API.isLoggedIn()) {
+                    // Just signed in — refresh to show league forms
+                    Router.handleRoute();
+                }
+            });
+        }
     } catch (e) {
         console.error('Clerk failed to load:', e);
     }

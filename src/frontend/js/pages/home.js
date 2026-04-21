@@ -20,17 +20,20 @@ Router.register('#/', async (container) => {
                 <div class="card text-center">
                     <div class="card-header">Iniciar sesión</div>
                     <p style="color:var(--text-secondary);margin-bottom:1rem">Inicia sesión con tu cuenta de Google o GitHub para jugar</p>
-                    <div id="clerk-sign-in"></div>
+                    <button class="btn btn-gold" id="btn-clerk-login" style="width:100%;font-size:1rem;padding:.75rem">
+                        🔐 Iniciar sesión
+                    </button>
                 </div>
             </div>
         `;
-        // Mount Clerk sign-in component
-        if (window.Clerk) {
-            window.Clerk.mountSignIn(document.getElementById('clerk-sign-in'), {
-                afterSignInUrl: window.location.href,
-                afterSignUpUrl: window.location.href,
-            });
-        }
+        document.getElementById('btn-clerk-login')?.addEventListener('click', () => {
+            if (window.Clerk) {
+                window.Clerk.openSignIn({
+                    afterSignInUrl: window.location.href,
+                    afterSignUpUrl: window.location.href,
+                });
+            }
+        });
         return;
     }
 
