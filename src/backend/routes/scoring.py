@@ -157,3 +157,13 @@ async def populate_calendar(auth: dict = Depends(get_current_team)):
         return {"ok": True, "matchdays_created": created_matchdays, "matches_created": created_matches}
     finally:
         await db.close()
+
+
+@router.post("/scoring/matchdays/{matchday_id}/simulate")
+async def simulate_matchday(matchday_id: str, auth: dict = Depends(get_current_team)):
+    """Simulate realistic scores for testing. Commissioner only."""
+    if not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+    from src.scripts.fetch_scores import simulate_match_scores
+    await simulate_match_scores(matchday_id)
+    return {"ok": True}

@@ -98,7 +98,10 @@ async function loadMatchday(container, mdId) {
         <div class="card mb-2">
             <div class="flex-between mb-1">
                 <div class="card-header" style="margin:0">Partidos</div>
-                ${isComm ? `<button class="btn btn-sm btn-primary" id="btn-add-match">+ Añadir partido</button>` : ''}
+                <div class="flex" style="gap:.5rem">
+                    ${isComm && md.status !== 'completed' ? `<button class="btn btn-sm btn-outline" id="btn-simulate" title="Simular puntuaciones aleatorias para testing">🎲 Simular</button>` : ''}
+                    ${isComm ? `<button class="btn btn-sm btn-primary" id="btn-add-match">+ Añadir partido</button>` : ''}
+                </div>
             </div>
             ${md.matches.length === 0 ? '<p style="color:var(--text-muted)">Sin partidos</p>' : ''}
             ${md.matches.map(m => `
@@ -139,6 +142,16 @@ async function loadMatchday(container, mdId) {
         </div>
         ` : ''}
     `;
+
+    // Simulate scores
+    document.getElementById('btn-simulate')?.addEventListener('click', async () => {
+        if (!confirm('¿Simular puntuaciones aleatorias para esta jornada? Los resultados existentes se sobrescribirán.')) return;
+        try {
+            await API.post(`/scoring/matchdays/${mdId}/simulate`);
+            showToast('Puntuaciones simuladas', 'success');
+            loadMatchday(container, mdId);
+        } catch (err) { showToast(err.message, 'error'); }
+    });
 
     // Add match
     document.getElementById('btn-add-match')?.addEventListener('click', async () => {
