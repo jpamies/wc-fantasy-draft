@@ -1,0 +1,13 @@
+{
+  "tournament": "FIFA World Cup 2026",
+  "host": ["USA", "MEX"],
+  "groups": {
+    "A": ["USA", "MEX", "EGY", "COL"],
+    "B": ["ESP", "JPN", "MAR", "CRO"],
+    "C": ["FRA", "ARG", "TUR", "SEN"],
+    "D": ["ENG", "BRA", "SUI", "QAT"],
+    "E": ["GER", "URU", "DEN", "POR"],
+    "F": ["ITA", "NED", "BEL", ""]
+  },
+  "notes": "Simplified to 23 available nations. Group F has 3 teams (bye round)."
+}

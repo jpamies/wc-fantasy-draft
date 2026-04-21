@@ -6,7 +6,10 @@ Router.register('#/scoring', async (container) => {
     container.innerHTML = `
         <div class="flex-between mb-2">
             <h2>⚽ Puntuación</h2>
-            ${isComm ? '<button class="btn btn-gold" id="btn-new-matchday">+ Crear Jornada</button>' : ''}
+            <div class="flex" style="gap:.5rem">
+                ${isComm && matchdays.length === 0 ? '<button class="btn btn-primary" id="btn-populate-calendar">📅 Cargar Calendario WC2026</button>' : ''}
+                ${isComm ? '<button class="btn btn-gold" id="btn-new-matchday">+ Crear Jornada</button>' : ''}
+            </div>
         </div>
 
         ${matchdays.length === 0 ? `
@@ -32,6 +35,15 @@ Router.register('#/scoring', async (container) => {
     // Click matchday to view detail
     container.querySelectorAll('[data-mdid]').forEach(card => {
         card.addEventListener('click', () => loadMatchday(container, card.dataset.mdid));
+    });
+
+    // Populate calendar
+    document.getElementById('btn-populate-calendar')?.addEventListener('click', async () => {
+        try {
+            const res = await API.post('/scoring/populate-calendar');
+            showToast(`Calendario cargado: ${res.matchdays_created} jornadas, ${res.matches_created} partidos`, 'success');
+            Router.handleRoute();
+        } catch (err) { showToast(err.message, 'error'); }
     });
 
     document.getElementById('btn-new-matchday')?.addEventListener('click', () => {

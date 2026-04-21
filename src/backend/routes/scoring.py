@@ -1,4 +1,6 @@
 import uuid
+import json
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from src.backend.auth import get_current_team
 from src.backend.database import get_db
@@ -116,3 +118,42 @@ async def submit_scores(matchday_id: str, body: ScoreBatchEntry, auth: dict = De
     finally:
         await db.close()
     return {"ok": True, "scores": results}
+
+
+@router.post("/scoring/populate-calendar")
+async def populate_calendar(auth: dict = Depends(get_current_team)):
+    """Pre-populate matchdays and matches from data/tournament/calendar.json. Commissioner only."""
+    if not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+    
+    calendar_path = os.path.join("data", "tournament", "calendar.json")
+    if not os.path.exists(calendar_path):
+        raise HTTPException(404, "Calendar file not found")
+    
+    with open(calendar_path, "r", encoding="utf-8") as f:
+        calendar = json.load(f)
+    
+    db = await get_db()
+    try:
+        created_matchdays = 0
+        created_matches = 0
+        for md in calendar:
+            # Skip if matchday already exists
+            existing = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=?", (md["id"],))
+            if existing:
+                continue
+            await db.execute(
+                "INSERT INTO matchdays (id, name, date, phase, status) VALUES (?,?,?,?,?)",
+                (md["id"], md["name"], md.get("date", ""), md.get("phase", "groups"), "upcoming"),
+            )
+            created_matchdays += 1
+            for m in md.get("matches", []):
+                await db.execute(
+                    "INSERT INTO matches (id, matchday_id, home_country, away_country, kickoff, status) VALUES (?,?,?,?,?,?)",
+                    (m["id"], md["id"], m["home"], m["away"], m.get("kickoff", ""), "scheduled"),
+                )
+                created_matches += 1
+        await db.commit()
+        return {"ok": True, "matchdays_created": created_matchdays, "matches_created": created_matches}
+    finally:
+        await db.close()
