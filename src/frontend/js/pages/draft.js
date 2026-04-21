@@ -166,6 +166,8 @@ Router.register('#/draft', async (container) => {
                 const res = await API.post(`/leagues/${leagueId}/draft/autodraft`);
                 autodraftEnabled = res.autodraft;
                 showToast(autodraftEnabled ? '🤖 AutoDraft activado — el sistema elegirá por ti' : 'AutoDraft desactivado', autodraftEnabled ? 'success' : 'info');
+                render();
+                // Also refresh state in case autodraft triggered picks
                 await refreshState();
             } catch (err) { showToast(err.message, 'error'); }
         });
