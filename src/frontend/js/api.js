@@ -38,6 +38,7 @@ const API = {
     get(path) { return this.request(path); },
     post(path, body) { return this.request(path, { method: 'POST', body: JSON.stringify(body) }); },
     patch(path, body) { return this.request(path, { method: 'PATCH', body: JSON.stringify(body) }); },
+    delete(path) { return this.request(path, { method: 'DELETE' }); },
 };
 
 function formatMoney(val) {

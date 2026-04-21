@@ -210,3 +210,77 @@ async def update_settings(league_id: str, body: LeagueSettings, auth: dict = Dep
         return {"ok": True}
     finally:
         await db.close()
+
+
+# --- My leagues (list all leagues for a Clerk user) ---
+
+@router.get("/my-leagues")
+async def my_leagues(nickname: str):
+    """Return all leagues where this user (Clerk ID) has a team."""
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            """SELECT l.id, l.name, l.code, l.status, ft.id as team_id, ft.team_name,
+                      l.commissioner_team_id
+               FROM fantasy_teams ft JOIN leagues l ON ft.league_id = l.id
+               WHERE ft.owner_nick = ?
+               ORDER BY ft.created_at DESC""",
+            (nickname,),
+        )
+        return [
+            {
+                "league_id": dict(r)["id"],
+                "league_name": dict(r)["name"],
+                "league_code": dict(r)["code"],
+                "status": dict(r)["status"],
+                "team_id": dict(r)["team_id"],
+                "team_name": dict(r)["team_name"],
+                "is_commissioner": dict(r)["commissioner_team_id"] == dict(r)["team_id"],
+            }
+            for r in rows
+        ]
+    finally:
+        await db.close()
+
+
+# --- Leave league ---
+
+@router.delete("/leagues/{league_id}/leave")
+async def leave_league(league_id: str, auth: dict = Depends(get_current_team)):
+    if auth["league_id"] != league_id:
+        raise HTTPException(403, "Not in this league")
+    if auth.get("is_commissioner"):
+        raise HTTPException(409, "Commissioner cannot leave — delete the league instead")
+    db = await get_db()
+    try:
+        # Delete team's players first
+        await db.execute("DELETE FROM team_players WHERE team_id=?", (auth["team_id"],))
+        # Delete the team
+        await db.execute("DELETE FROM fantasy_teams WHERE id=?", (auth["team_id"],))
+        await db.commit()
+        return {"ok": True}
+    finally:
+        await db.close()
+
+
+# --- Delete league (commissioner only) ---
+
+@router.delete("/leagues/{league_id}")
+async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
+    if auth["league_id"] != league_id or not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+    db = await get_db()
+    try:
+        # Delete all team players in this league
+        await db.execute(
+            "DELETE FROM team_players WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
+            (league_id,),
+        )
+        # Delete all teams
+        await db.execute("DELETE FROM fantasy_teams WHERE league_id=?", (league_id,))
+        # Delete the league
+        await db.execute("DELETE FROM leagues WHERE id=?", (league_id,))
+        await db.commit()
+        return {"ok": True}
+    finally:
+        await db.close()

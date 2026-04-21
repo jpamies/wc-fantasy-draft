@@ -64,9 +64,22 @@ async function renderLeaguePage(container) {
                         ${league.transfer_window_open ? '🔒 Cerrar Mercado' : '🔓 Abrir Mercado'}
                     </button>
                 ` : ''}
+                <button class="btn" id="btn-delete-league" style="background:var(--accent-red,#e74c3c);color:#fff;margin-left:auto">
+                    🗑️ Eliminar Liga
+                </button>
             </div>
         </div>
-        ` : ''}
+        ` : `
+        <div style="text-align:right;margin-top:1rem">
+            <button class="btn" id="btn-leave-league" style="background:var(--accent-red,#e74c3c);color:#fff;font-size:.85rem">
+                🚪 Salir de la Liga
+            </button>
+        </div>
+        `}
+
+        <div style="text-align:center;margin-top:1rem">
+            <button class="btn btn-sm" id="btn-switch-league" style="opacity:.7">↩️ Cambiar de liga</button>
+        </div>
     `;
 
     document.getElementById('league-code')?.addEventListener('click', () => {
@@ -101,5 +114,35 @@ async function renderLeaguePage(container) {
             showToast(league.transfer_window_open ? 'Mercado cerrado' : 'Mercado abierto', 'success');
             renderLeaguePage(container);
         } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    document.getElementById('btn-leave-league')?.addEventListener('click', async () => {
+        if (!confirm('¿Seguro que quieres salir de esta liga? Perderás tu equipo y jugadores.')) return;
+        try {
+            await API.delete(`/leagues/${leagueId}/leave`);
+            API.logout();
+            localStorage.removeItem('wcf_last_league_code');
+            document.getElementById('main-nav').classList.add('hidden');
+            showToast('Has salido de la liga', 'success');
+            Router.navigate('#/');
+        } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    document.getElementById('btn-delete-league')?.addEventListener('click', async () => {
+        if (!confirm('⚠️ ¿Eliminar esta liga? Se borrarán TODOS los equipos y datos. Esta acción no se puede deshacer.')) return;
+        try {
+            await API.delete(`/leagues/${leagueId}`);
+            API.logout();
+            localStorage.removeItem('wcf_last_league_code');
+            document.getElementById('main-nav').classList.add('hidden');
+            showToast('Liga eliminada', 'success');
+            Router.navigate('#/');
+        } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    document.getElementById('btn-switch-league')?.addEventListener('click', () => {
+        API.logout();
+        document.getElementById('main-nav').classList.add('hidden');
+        Router.navigate('#/');
     });
 }

@@ -35,7 +35,6 @@ Router.register('#/', async (container) => {
                         afterSignUpUrl: window.location.href,
                     });
                 } catch {
-                    // Fallback: redirect to Clerk hosted sign-in page
                     window.Clerk.redirectToSignIn({ redirectUrl: window.location.href });
                 }
             }
@@ -43,30 +42,93 @@ Router.register('#/', async (container) => {
         return;
     }
 
-    // Signed in with Clerk — show league create/join (auto-recover if possible)
+    // Signed in with Clerk
     const nickname = clerkUser.name;
     const clerkId = clerkUser.id;
 
-    // Try auto-recover: check if this Clerk user already has a team
+    // If coming with a code link, skip auto-recover and show join form
     if (prefilledCode) {
-        // Don't auto-recover if they came with a code link — let them join
-    } else {
-        const savedCode = localStorage.getItem('wcf_last_league_code');
-        if (savedCode) {
-            try {
-                const auth = await API.post('/auth/recover', { league_code: savedCode, nickname: clerkId });
-                loginWith(auth);
-                localStorage.setItem('wcf_last_league_code', savedCode);
-                return;
-            } catch {} // Not found, show normal form
-        }
+        showCreateJoinForms(container, nickname, clerkId, prefilledCode);
+        return;
     }
+
+    // Fetch user's existing leagues
+    let myLeagues = [];
+    try {
+        myLeagues = await API.get(`/my-leagues?nickname=${encodeURIComponent(clerkId)}`);
+    } catch {}
+
+    // No leagues — show create/join forms
+    if (myLeagues.length === 0) {
+        showCreateJoinForms(container, nickname, clerkId, '');
+        return;
+    }
+
+    // Exactly 1 league — auto-enter
+    if (myLeagues.length === 1) {
+        const lg = myLeagues[0];
+        try {
+            const auth = await API.post('/auth/recover', { league_code: lg.league_code, nickname: clerkId });
+            loginWith(auth);
+            localStorage.setItem('wcf_last_league_code', lg.league_code);
+            localStorage.setItem('wcf_display_name', nickname);
+            return;
+        } catch {}
+    }
+
+    // Multiple leagues — show selector
+    const statusLabels = {
+        setup: '⚙️', draft_pending: '📋', draft_in_progress: '🔄', active: '✅', completed: '🏆'
+    };
 
     container.innerHTML = `
         <div class="hero">
             <h1>⚽ WC Fantasy 2026</h1>
             <p>Bienvenido, <strong>${nickname}</strong>!</p>
             ${clerkUser.avatar ? `<img src="${clerkUser.avatar}" style="width:48px;height:48px;border-radius:50%;margin-top:.5rem">` : ''}
+        </div>
+        <div style="max-width:500px;margin:1.5rem auto">
+            <div class="card">
+                <div class="card-header">Mis Ligas</div>
+                <div style="display:flex;flex-direction:column;gap:.75rem">
+                    ${myLeagues.map(lg => `
+                        <button class="btn btn-primary league-select-btn" data-code="${lg.league_code}" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:.75rem 1rem">
+                            <span>${statusLabels[lg.status] || ''} <strong>${lg.league_name}</strong></span>
+                            <span style="font-size:.85rem;opacity:.8">${lg.team_name} ${lg.is_commissioner ? '👑' : ''}</span>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+            <div style="text-align:center;margin-top:1rem">
+                <button class="btn btn-gold" id="btn-new-league">➕ Crear o unirse a otra liga</button>
+            </div>
+        </div>
+    `;
+
+    container.querySelectorAll('.league-select-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const code = btn.dataset.code;
+            try {
+                const auth = await API.post('/auth/recover', { league_code: code, nickname: clerkId });
+                loginWith(auth);
+                localStorage.setItem('wcf_last_league_code', code);
+                localStorage.setItem('wcf_display_name', nickname);
+            } catch (err) { showToast(err.message, 'error'); }
+        });
+    });
+
+    document.getElementById('btn-new-league')?.addEventListener('click', () => {
+        showCreateJoinForms(container, nickname, clerkId, '');
+    });
+});
+
+function showCreateJoinForms(container, nickname, clerkId, prefilledCode) {
+    const clerkUser = window.getClerkUser?.();
+    container.innerHTML = `
+        <div class="hero">
+            <h1>⚽ WC Fantasy 2026</h1>
+            <p>Bienvenido, <strong>${nickname}</strong>!</p>
+            ${clerkUser?.avatar ? `<img src="${clerkUser.avatar}" style="width:48px;height:48px;border-radius:50%;margin-top:.5rem">` : ''}
         </div>
         <div class="auth-panels">
             <div class="card">
@@ -132,7 +194,7 @@ Router.register('#/', async (container) => {
             showToast('¡Te has unido a la liga!', 'success');
         } catch (err) { showToast(err.message, 'error'); }
     };
-});
+}
 
 function loginWith(auth) {
     API.setToken(auth.token);
