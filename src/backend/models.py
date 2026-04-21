@@ -64,7 +64,7 @@ class LeagueOut(BaseModel):
     commissioner_team_id: Optional[str] = None
     mode: str = "draft"
     status: str = "setup"
-    max_teams: int = 8
+    max_teams: int = 10
     initial_budget: int = 500000000
     draft_timer_seconds: int = 60
     max_clausulazos_per_window: int = 2

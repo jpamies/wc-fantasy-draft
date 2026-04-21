@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS leagues (
     commissioner_team_id TEXT,
     mode TEXT NOT NULL DEFAULT 'draft' CHECK(mode IN ('draft','classic')),
     status TEXT NOT NULL DEFAULT 'setup' CHECK(status IN ('setup','draft_pending','draft_in_progress','active','completed')),
-    max_teams INTEGER DEFAULT 8,
+    max_teams INTEGER DEFAULT 10,
     initial_budget INTEGER DEFAULT 500000000,
     draft_timer_seconds INTEGER DEFAULT 60,
     max_clausulazos_per_window INTEGER DEFAULT 2,

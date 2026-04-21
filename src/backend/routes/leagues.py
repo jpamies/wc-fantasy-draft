@@ -34,14 +34,14 @@ async def create_league(body: LeagueCreate):
                draft_order, captain_multiplier, created_at)
                VALUES (?,?,?,'draft','setup',?,?,?,?,?,?,?,?)""",
             (league_id, body.name, code,
-             s.max_teams or 8, s.initial_budget or 500000000,
+             s.max_teams or 10, s.initial_budget or 500000000,
              s.draft_timer_seconds or 60, s.max_clausulazos_per_window or 2,
              1 if s.auto_substitutions is None else int(s.auto_substitutions),
              s.draft_order or "snake", s.captain_multiplier or 2.0, now),
         )
         await db.commit()
         return LeagueOut(id=league_id, name=body.name, code=code,
-                         max_teams=s.max_teams or 8, initial_budget=s.initial_budget or 500000000,
+                         max_teams=s.max_teams or 10, initial_budget=s.initial_budget or 500000000,
                          draft_timer_seconds=s.draft_timer_seconds or 60,
                          max_clausulazos_per_window=s.max_clausulazos_per_window or 2,
                          draft_order=s.draft_order or "snake",
