@@ -77,7 +77,7 @@ async def update_lineup(team_id: str, body: LineupUpdate, auth: dict = Depends(g
             if len(body.starters) != 11:
                 raise HTTPException(400, "Must have exactly 11 starters")
 
-            # Get positions of selected starters
+            # Verify all players belong to team
             placeholders = ",".join("?" for _ in body.starters)
             starter_rows = await db.execute_fetchall(
                 f"""SELECT tp.player_id, p.position FROM team_players tp
@@ -87,15 +87,6 @@ async def update_lineup(team_id: str, body: LineupUpdate, auth: dict = Depends(g
             )
             if len(starter_rows) != 11:
                 raise HTTPException(400, "Some players not in your team")
-
-            pos_counts = {"GK": 0, "DEF": 0, "MID": 0, "FWD": 0}
-            for r in starter_rows:
-                pos_counts[r["position"]] += 1
-            if pos_counts["GK"] != 1:
-                raise HTTPException(400, "Must have exactly 1 GK as starter")
-            for pos in ["DEF", "MID", "FWD"]:
-                if pos_counts[pos] != req[pos]:
-                    raise HTTPException(400, f"Formation {formation} requires {req[pos]} {pos}, got {pos_counts[pos]}")
 
             # Reset all, then set starters
             await db.execute("UPDATE team_players SET is_starter=0 WHERE team_id=?", (team_id,))

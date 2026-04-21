@@ -35,12 +35,20 @@ Router.register('#/team', async (container) => {
     function validateFormation() {
         if (starterIds.size !== 11) return `Necesitas 11 titulares (tienes ${starterIds.size})`;
         const counts = getPositionCounts();
+        if (counts.GK < 1) return 'Necesitas al menos 1 portero titular';
+        return null; // Formation is advisory, not enforced
+    }
+
+    function getFormationWarning() {
+        if (starterIds.size !== 11) return null;
+        const counts = getPositionCounts();
         const req = FORMATIONS[formation];
-        if (counts.GK !== 1) return 'Necesitas exactamente 1 portero titular';
+        const mismatches = [];
+        if (counts.GK !== 1) mismatches.push(`GK: ${counts.GK}/1`);
         for (const pos of ['DEF','MID','FWD']) {
-            if (counts[pos] !== req[pos]) return `${formation} requiere ${req[pos]} ${pos}, tienes ${counts[pos]}`;
+            if (counts[pos] !== req[pos]) mismatches.push(`${pos}: ${counts[pos]}/${req[pos]}`);
         }
-        return null;
+        return mismatches.length ? `Formación ${formation} sugiere: ${mismatches.join(', ')}` : null;
     }
 
     const POS_ORDER = {GK:0, DEF:1, MID:2, FWD:3};
@@ -142,6 +150,7 @@ Router.register('#/team', async (container) => {
                     </div>
                 </div>
                 ${error ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem">⚠️ ${error}</div>` : ''}
+                ${!error && getFormationWarning() ? `<div style="color:var(--accent-gold);font-size:.8rem;margin-bottom:.5rem">💡 ${getFormationWarning()}</div>` : ''}
                 ${renderFormationField(starters)}
             </div>
 
@@ -181,7 +190,7 @@ Router.register('#/team', async (container) => {
             </div>
 
             <div class="mt-2 text-center flex" style="justify-content:center;gap:1rem">
-                <button class="btn btn-gold" id="btn-save-lineup" ${error && starterIds.size === 11 ? 'disabled' : ''}>
+                <button class="btn btn-gold" id="btn-save-lineup" ${error ? 'disabled' : ''}>
                     💾 Guardar alineación
                 </button>
                 ${starterIds.size !== 11 ? `<span style="color:var(--text-muted);font-size:.85rem">Selecciona ${11 - starterIds.size} titular(es) más</span>` : ''}
