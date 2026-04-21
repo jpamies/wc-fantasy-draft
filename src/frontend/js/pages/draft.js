@@ -15,15 +15,22 @@ Router.register('#/draft', async (container) => {
     let ws = null;
     let wsConnected = false;
     let pollTimer = null;
-    let alive = true; // track if we're still on this page
+    let alive = true;
     let lastPickCount = state.picks ? state.picks.length : 0;
     let autodraftEnabled = false;
+    let draftQueue = []; // [{id, name, position, ...}, ...]
 
-    // Check initial autodraft status
+    // Check initial autodraft + queue status
     try {
         const adStatus = await API.get(`/leagues/${leagueId}/draft/autodraft`);
         autodraftEnabled = adStatus.team_autodraft || false;
     } catch {}
+
+    async function loadQueue() {
+        try {
+            draftQueue = await API.get(`/leagues/${leagueId}/draft/queue`);
+        } catch { draftQueue = []; }
+    }
 
     async function loadAvailable() {
         const params = new URLSearchParams();
@@ -56,15 +63,16 @@ Router.register('#/draft', async (container) => {
                         🤖 AutoDraft ${autodraftEnabled ? 'ON' : 'OFF'}
                     </button>
                 </div>
-                ${autodraftEnabled ? '<div style="font-size:.8rem;color:var(--accent-gold);margin-top:.5rem">AutoDraft activado — selección automática inteligente (2-3 GK, 5+ DEF/MID/FWD)</div>' : ''}
+                ${autodraftEnabled ? '<div style="font-size:.8rem;color:var(--accent-gold);margin-top:.5rem">AutoDraft activado — selección automática inteligente</div>' : ''}
+                ${draftQueue.length > 0 && !autodraftEnabled ? `<div style="font-size:.8rem;color:var(--accent-teal);margin-top:.5rem">📋 Cola activa (${draftQueue.length} jugadores) — auto-pick del siguiente disponible</div>` : ''}
             </div>` : '<div class="card text-center mb-2"><p style="color:var(--accent-gold);font-size:1.2rem">🏆 Draft completado — ¡Gestiona tu equipo!</p></div>'}
 
-            <div class="grid" style="grid-template-columns: 1fr 350px;">
+            <div class="grid" style="grid-template-columns: 1fr 300px 300px;">
                 <div>
                     <div class="card">
                         <div class="flex-between mb-1">
                             <div class="card-header" style="margin:0">Jugadores disponibles (${availablePlayers.length})</div>
-                            <input type="text" id="draft-search" placeholder="Buscar..." style="width:200px" value="${searchTerm}">
+                            <input type="text" id="draft-search" placeholder="Buscar..." style="width:160px" value="${searchTerm}">
                         </div>
                         <div class="filter-bar">
                             ${['', 'GK', 'DEF', 'MID', 'FWD'].map(p =>
@@ -72,11 +80,37 @@ Router.register('#/draft', async (container) => {
                             ).join('')}
                         </div>
                         <div id="player-list" style="max-height:500px;overflow-y:auto">
-                            ${renderPlayerList(availablePlayers, myTurn && !isDone)}
+                            ${renderPlayerList(availablePlayers, myTurn && !isDone, !isDone)}
                         </div>
                     </div>
                 </div>
                 <div>
+                <div>
+                    <div class="card mb-2">
+                        <div class="flex-between mb-1">
+                            <div class="card-header" style="margin:0">📋 Cola de Draft</div>
+                            ${draftQueue.length > 0 ? `<button class="btn btn-sm btn-outline" id="btn-clear-queue">Limpiar</button>` : ''}
+                        </div>
+                        ${draftQueue.length === 0 ? '<p style="color:var(--text-muted);font-size:.85rem;padding:.5rem 0">Añade jugadores con el botón + de la lista para que se pickeen automáticamente en tu turno.</p>' : ''}
+                        <div style="max-height:250px;overflow-y:auto">
+                            ${draftQueue.map((p, i) => `
+                                <div class="player-card queue-item ${!p.available ? 'queue-taken' : ''}">
+                                    <span style="color:var(--text-muted);font-size:.8rem;width:20px">${i + 1}</span>
+                                    <div class="player-info" style="flex:1;min-width:0">
+                                        <div class="player-name" style="font-size:.85rem">${p.name}</div>
+                                        <div class="player-meta">${p.country_code}</div>
+                                    </div>
+                                    ${posBadge(p.position)}
+                                    ${!p.available ? '<span style="font-size:.7rem;color:var(--accent-red)">Tomado</span>' : ''}
+                                    <div style="display:flex;flex-direction:column;gap:2px">
+                                        <button class="btn btn-sm btn-outline queue-up" data-pid="${p.id}" style="padding:1px 4px;font-size:.7rem" ${i === 0 ? 'disabled' : ''}>▲</button>
+                                        <button class="btn btn-sm btn-outline queue-down" data-pid="${p.id}" style="padding:1px 4px;font-size:.7rem" ${i === draftQueue.length - 1 ? 'disabled' : ''}>▼</button>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline queue-remove" data-pid="${p.id}" style="padding:2px 6px" title="Quitar">✕</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
                     <div class="card">
                         <div class="flex-between mb-1">
                             <div class="card-header" style="margin:0">Historial de picks</div>
@@ -93,8 +127,11 @@ Router.register('#/draft', async (container) => {
         bindEvents();
     }
 
-    function renderPlayerList(players, canPick) {
-        return players.map(p => `
+    function renderPlayerList(players, canPick, canQueue) {
+        const queuedIds = new Set(draftQueue.map(p => p.id));
+        return players.map(p => {
+            const inQueue = queuedIds.has(p.id);
+            return `
             <div class="player-card" data-pid="${p.id}">
                 <img src="${p.photo}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><rect fill=%22%23374151%22 width=%2240%22 height=%2240%22/><text x=%2220%22 y=%2225%22 text-anchor=%22middle%22 fill=%22%239ca3af%22 font-size=%2214%22>⚽</text></svg>'">
                 <div class="player-info">
@@ -103,9 +140,10 @@ Router.register('#/draft', async (container) => {
                 </div>
                 ${posBadge(p.position)}
                 <div class="player-value">${formatMoney(p.market_value)}</div>
+                ${canQueue ? `<button class="btn btn-sm ${inQueue ? 'btn-teal' : 'btn-outline'} queue-add-btn" data-pid="${p.id}" title="${inQueue ? 'En cola' : 'Añadir a cola'}">${inQueue ? '✓' : '+'}</button>` : ''}
                 ${canPick ? `<button class="btn btn-primary btn-sm pick-btn" data-pid="${p.id}">Pick</button>` : ''}
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     }
 
     function renderPickLog(picks) {
@@ -143,13 +181,13 @@ Router.register('#/draft', async (container) => {
         document.getElementById('draft-search')?.addEventListener('input', async (e) => {
             searchTerm = e.target.value;
             await loadAvailable();
-            // Only update the player list, not the whole page
             const list = document.getElementById('player-list');
             if (list) {
                 const myTurn = state.current_team_id === API.getTeamId();
                 const isDone = state.status === 'completed';
-                list.innerHTML = renderPlayerList(availablePlayers, myTurn && !isDone);
+                list.innerHTML = renderPlayerList(availablePlayers, myTurn && !isDone, !isDone);
                 bindPickButtons();
+                bindQueueAddButtons();
             }
         });
 
@@ -167,8 +205,72 @@ Router.register('#/draft', async (container) => {
                 autodraftEnabled = res.autodraft;
                 showToast(autodraftEnabled ? '🤖 AutoDraft activado — el sistema elegirá por ti' : 'AutoDraft desactivado', autodraftEnabled ? 'success' : 'info');
                 render();
-                // Also refresh state in case autodraft triggered picks
                 await refreshState();
+            } catch (err) { showToast(err.message, 'error'); }
+        });
+
+        // Queue: add from player list
+        container.querySelectorAll('.queue-add-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const pid = btn.dataset.pid;
+                const inQueue = draftQueue.some(p => p.id === pid);
+                try {
+                    if (inQueue) {
+                        await API.post(`/leagues/${leagueId}/draft/queue/remove`, { player_id: pid });
+                    } else {
+                        await API.post(`/leagues/${leagueId}/draft/queue/add`, { player_id: pid });
+                    }
+                    await loadQueue();
+                    render();
+                } catch (err) { showToast(err.message, 'error'); }
+            });
+        });
+
+        // Queue: remove
+        container.querySelectorAll('.queue-remove').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                try {
+                    await API.post(`/leagues/${leagueId}/draft/queue/remove`, { player_id: btn.dataset.pid });
+                    await loadQueue();
+                    render();
+                } catch (err) { showToast(err.message, 'error'); }
+            });
+        });
+
+        // Queue: move up/down
+        container.querySelectorAll('.queue-up').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const q = draftQueue.map(p => p.id);
+                const idx = q.indexOf(btn.dataset.pid);
+                if (idx > 0) { [q[idx], q[idx-1]] = [q[idx-1], q[idx]]; }
+                try {
+                    await API.post(`/leagues/${leagueId}/draft/queue/reorder`, { queue: q });
+                    await loadQueue();
+                    render();
+                } catch (err) { showToast(err.message, 'error'); }
+            });
+        });
+        container.querySelectorAll('.queue-down').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const q = draftQueue.map(p => p.id);
+                const idx = q.indexOf(btn.dataset.pid);
+                if (idx < q.length - 1) { [q[idx], q[idx+1]] = [q[idx+1], q[idx]]; }
+                try {
+                    await API.post(`/leagues/${leagueId}/draft/queue/reorder`, { queue: q });
+                    await loadQueue();
+                    render();
+                } catch (err) { showToast(err.message, 'error'); }
+            });
+        });
+
+        // Queue: clear
+        document.getElementById('btn-clear-queue')?.addEventListener('click', async () => {
+            try {
+                await API.post(`/leagues/${leagueId}/draft/queue/clear`);
+                await loadQueue();
+                render();
+                showToast('Cola vaciada', 'info');
             } catch (err) { showToast(err.message, 'error'); }
         });
     }
@@ -188,6 +290,25 @@ Router.register('#/draft', async (container) => {
         });
     }
 
+    function bindQueueAddButtons() {
+        container.querySelectorAll('.queue-add-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const pid = btn.dataset.pid;
+                const inQueue = draftQueue.some(p => p.id === pid);
+                try {
+                    if (inQueue) {
+                        await API.post(`/leagues/${leagueId}/draft/queue/remove`, { player_id: pid });
+                    } else {
+                        await API.post(`/leagues/${leagueId}/draft/queue/add`, { player_id: pid });
+                    }
+                    await loadQueue();
+                    render();
+                } catch (err) { showToast(err.message, 'error'); }
+            });
+        });
+    }
+
     async function refreshState() {
         if (!alive) return;
         try {
@@ -200,6 +321,7 @@ Router.register('#/draft', async (container) => {
                 state = newState;
                 lastPickCount = newPickCount;
                 await loadAvailable();
+                await loadQueue();
                 render();
 
                 // Notify if it became my turn
@@ -236,6 +358,7 @@ Router.register('#/draft', async (container) => {
                             state = msg.state;
                             lastPickCount = newPickCount;
                             await loadAvailable();
+                            await loadQueue();
                             render();
 
                             if (msg.type === 'pick' && msg.pick) {
@@ -292,6 +415,7 @@ Router.register('#/draft', async (container) => {
 
     // --- Initialize ---
     await loadAvailable();
+    await loadQueue();
     render();
     connectWS();
     // Always start polling as a safety net (WS will disable it when connected)

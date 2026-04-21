@@ -8,6 +8,9 @@ from src.backend.database import get_db
 # In-memory autodraft state: { league_id: { team_id: True } }
 _autodraft_teams: dict[str, dict[str, bool]] = {}
 
+# In-memory draft queue (wishlist): { league_id: { team_id: [player_id, ...] } }
+_draft_queues: dict[str, dict[str, list[str]]] = {}
+
 # Squad composition targets for autodraft
 SQUAD_TARGETS = {"GK": (2, 3), "DEF": (5, 8), "MID": (5, 8), "FWD": (5, 8)}  # (min, max)
 SQUAD_SIZE = 23
@@ -388,7 +391,7 @@ class DraftEngine:
 
     @staticmethod
     async def process_autodraft(league_id: str) -> list[dict]:
-        """After a pick, check if the next team(s) have autodraft enabled and pick for them.
+        """After a pick, check if the next team(s) have autodraft OR queue enabled and pick for them.
         Returns list of auto-picks made (for broadcasting)."""
         results = []
         max_iterations = 100  # safety limit
@@ -399,15 +402,108 @@ class DraftEngine:
                 break
 
             current_team = state["current_team_id"]
-            if not current_team or not DraftEngine.is_autodraft(league_id, current_team):
+            if not current_team:
                 break
 
-            result = await DraftEngine.smart_pick(league_id, current_team)
+            has_autodraft = DraftEngine.is_autodraft(league_id, current_team)
+            has_queue = DraftEngine.has_queue(league_id, current_team)
+
+            if not has_autodraft and not has_queue:
+                break
+
+            # Queue takes priority over autodraft
+            if has_queue:
+                result = await DraftEngine.pick_from_queue(league_id, current_team)
+            else:
+                result = await DraftEngine.smart_pick(league_id, current_team)
+
             if "error" in result:
-                # Disable autodraft if there's an error
-                DraftEngine.set_autodraft(league_id, current_team, False)
+                if has_autodraft:
+                    DraftEngine.set_autodraft(league_id, current_team, False)
                 break
 
+            result["auto_mode"] = "queue" if has_queue else "autodraft"
             results.append(result)
 
         return results
+
+    # --- Draft Queue (Wishlist) methods ---
+
+    @staticmethod
+    def set_queue(league_id: str, team_id: str, player_ids: list[str]):
+        if league_id not in _draft_queues:
+            _draft_queues[league_id] = {}
+        _draft_queues[league_id][team_id] = list(player_ids)
+
+    @staticmethod
+    def get_queue(league_id: str, team_id: str) -> list[str]:
+        return _draft_queues.get(league_id, {}).get(team_id, [])
+
+    @staticmethod
+    def has_queue(league_id: str, team_id: str) -> bool:
+        q = DraftEngine.get_queue(league_id, team_id)
+        return len(q) > 0
+
+    @staticmethod
+    def add_to_queue(league_id: str, team_id: str, player_id: str):
+        if league_id not in _draft_queues:
+            _draft_queues[league_id] = {}
+        if team_id not in _draft_queues[league_id]:
+            _draft_queues[league_id][team_id] = []
+        q = _draft_queues[league_id][team_id]
+        if player_id not in q:
+            q.append(player_id)
+
+    @staticmethod
+    def remove_from_queue(league_id: str, team_id: str, player_id: str):
+        q = _draft_queues.get(league_id, {}).get(team_id, [])
+        if player_id in q:
+            q.remove(player_id)
+
+    @staticmethod
+    def move_in_queue(league_id: str, team_id: str, player_id: str, direction: int):
+        """Move a player up (-1) or down (+1) in the queue."""
+        q = _draft_queues.get(league_id, {}).get(team_id, [])
+        if player_id not in q:
+            return
+        idx = q.index(player_id)
+        new_idx = max(0, min(len(q) - 1, idx + direction))
+        if idx != new_idx:
+            q.pop(idx)
+            q.insert(new_idx, player_id)
+
+    @staticmethod
+    def clear_queue(league_id: str, team_id: str):
+        if league_id in _draft_queues and team_id in _draft_queues[league_id]:
+            _draft_queues[league_id][team_id] = []
+
+    @staticmethod
+    async def pick_from_queue(league_id: str, team_id: str) -> dict:
+        """Pick the first available player from this team's queue."""
+        q = DraftEngine.get_queue(league_id, team_id)
+        if not q:
+            return {"error": "Queue is empty"}
+
+        db = await get_db()
+        try:
+            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            if not drafts:
+                return {"error": "No draft found"}
+            draft_id = drafts[0]["id"]
+
+            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
+            picked_set = {p["player_id"] for p in picked}
+
+            # Find the first queued player that's still available
+            for player_id in list(q):
+                if player_id not in picked_set:
+                    # Remove from queue and pick
+                    q.remove(player_id)
+                    return await DraftEngine.make_pick(league_id, team_id, player_id)
+                else:
+                    # Already drafted by someone else, remove from queue
+                    q.remove(player_id)
+
+            return {"error": "No queued players available"}
+        finally:
+            await db.close()

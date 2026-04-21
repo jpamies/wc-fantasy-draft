@@ -106,13 +106,86 @@ async def toggle_autodraft(league_id: str, auth: dict = Depends(get_current_team
 
 @router.get("/leagues/{league_id}/draft/autodraft")
 async def get_autodraft_status(league_id: str, auth: dict = Depends(get_current_team)):
-    """Get autodraft status for all teams in the league."""
+    """Get autodraft status and queue for this team."""
     if auth["league_id"] != league_id:
         raise HTTPException(403, "Not in this league")
     return {
         "team_autodraft": DraftEngine.is_autodraft(league_id, auth["team_id"]),
+        "queue": DraftEngine.get_queue(league_id, auth["team_id"]),
         "all": DraftEngine.get_autodraft_teams(league_id),
     }
+
+
+# --- Draft Queue (Cola de Draft) ---
+
+@router.get("/leagues/{league_id}/draft/queue")
+async def get_queue(league_id: str, auth: dict = Depends(get_current_team)):
+    """Get this team's draft queue with player details."""
+    if auth["league_id"] != league_id:
+        raise HTTPException(403, "Not in this league")
+    queue_ids = DraftEngine.get_queue(league_id, auth["team_id"])
+    if not queue_ids:
+        return []
+    # Get player details for queued players
+    from src.backend.database import get_db
+    db = await get_db()
+    try:
+        placeholders = ",".join("?" for _ in queue_ids)
+        rows = await db.execute_fetchall(
+            f"SELECT * FROM players WHERE id IN ({placeholders})", queue_ids
+        )
+        player_map = {r["id"]: dict(r) for r in rows}
+        # Return in queue order with availability info
+        drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+        picked_set = set()
+        if drafts:
+            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (drafts[0]["id"],))
+            picked_set = {p["player_id"] for p in picked}
+
+        result = []
+        for pid in queue_ids:
+            p = player_map.get(pid)
+            if p:
+                p["available"] = pid not in picked_set
+                result.append(p)
+        return result
+    finally:
+        await db.close()
+
+
+@router.post("/leagues/{league_id}/draft/queue/add")
+async def add_to_queue(league_id: str, body: DraftPickRequest, auth: dict = Depends(get_current_team)):
+    if auth["league_id"] != league_id:
+        raise HTTPException(403, "Not in this league")
+    DraftEngine.add_to_queue(league_id, auth["team_id"], body.player_id)
+    # If it's my turn and I have a queue, process
+    await _process_and_broadcast_autodraft(league_id)
+    return {"ok": True, "queue": DraftEngine.get_queue(league_id, auth["team_id"])}
+
+
+@router.post("/leagues/{league_id}/draft/queue/remove")
+async def remove_from_queue(league_id: str, body: DraftPickRequest, auth: dict = Depends(get_current_team)):
+    if auth["league_id"] != league_id:
+        raise HTTPException(403, "Not in this league")
+    DraftEngine.remove_from_queue(league_id, auth["team_id"], body.player_id)
+    return {"ok": True, "queue": DraftEngine.get_queue(league_id, auth["team_id"])}
+
+
+@router.post("/leagues/{league_id}/draft/queue/reorder")
+async def reorder_queue(league_id: str, body: dict, auth: dict = Depends(get_current_team)):
+    """Set the full queue order. Body: {"queue": ["player_id_1", "player_id_2", ...]}"""
+    if auth["league_id"] != league_id:
+        raise HTTPException(403, "Not in this league")
+    DraftEngine.set_queue(league_id, auth["team_id"], body.get("queue", []))
+    return {"ok": True, "queue": DraftEngine.get_queue(league_id, auth["team_id"])}
+
+
+@router.post("/leagues/{league_id}/draft/queue/clear")
+async def clear_queue(league_id: str, auth: dict = Depends(get_current_team)):
+    if auth["league_id"] != league_id:
+        raise HTTPException(403, "Not in this league")
+    DraftEngine.clear_queue(league_id, auth["team_id"])
+    return {"ok": True, "queue": []}
 
 
 async def _process_and_broadcast_autodraft(league_id: str):
