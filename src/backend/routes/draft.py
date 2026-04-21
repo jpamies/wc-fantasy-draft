@@ -77,7 +77,7 @@ async def auto_pick(league_id: str, auth: dict = Depends(get_current_team)):
     return result
 
 
-@router.websocket("/api/v1/leagues/{league_id}/draft/ws")
+@router.websocket("/leagues/{league_id}/draft/ws")
 async def draft_websocket(websocket: WebSocket, league_id: str):
     await websocket.accept()
     if league_id not in _draft_connections:
