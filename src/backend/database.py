@@ -178,6 +178,8 @@ async def init_db():
             await db.execute("ALTER TABLE fantasy_teams ADD COLUMN display_name TEXT DEFAULT ''")
         except Exception:
             pass  # Column already exists
+        # Migration: update existing leagues from max_teams=8 to 10
+        await db.execute("UPDATE leagues SET max_teams=10 WHERE max_teams=8")
         await db.commit()
     finally:
         await db.close()
