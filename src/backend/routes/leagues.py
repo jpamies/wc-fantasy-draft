@@ -67,6 +67,10 @@ async def join_league(body: AuthJoin):
         if existing:
             raise HTTPException(409, "Nickname already taken in this league")
 
+        # Cannot join after draft has started
+        if league["status"] not in ("setup", "draft_pending"):
+            raise HTTPException(409, "League already started — cannot join after draft begins")
+
         # Check team count
         teams = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM fantasy_teams WHERE league_id=?", (league["id"],))
         if teams[0]["cnt"] >= league["max_teams"]:
