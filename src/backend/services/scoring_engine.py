@@ -129,14 +129,23 @@ class ScoringEngine:
         """Calculate a team's points for a matchday with auto-substitution."""
         db = await get_db()
         try:
-            # Get all team players with their roles
+            # Try matchday-specific lineup first, fall back to default
             roster = await db.execute_fetchall(
-                """SELECT tp.player_id, tp.is_starter, tp.is_captain, tp.is_vice_captain,
+                """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain,
                           p.position
-                   FROM team_players tp JOIN players p ON tp.player_id = p.id
-                   WHERE tp.team_id=?""",
-                (team_id,),
+                   FROM matchday_lineups ml JOIN players p ON ml.player_id = p.id
+                   WHERE ml.team_id=? AND ml.matchday_id=?""",
+                (team_id, matchday_id),
             )
+            if not roster:
+                # Fall back to default team_players
+                roster = await db.execute_fetchall(
+                    """SELECT tp.player_id, tp.is_starter, tp.is_captain, tp.is_vice_captain,
+                              p.position
+                       FROM team_players tp JOIN players p ON tp.player_id = p.id
+                       WHERE tp.team_id=?""",
+                    (team_id,),
+                )
             starters = [dict(r) for r in roster if r["is_starter"]]
             bench = [dict(r) for r in roster if not r["is_starter"]]
 

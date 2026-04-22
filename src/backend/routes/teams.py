@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
+from datetime import datetime, timezone
 from src.backend.database import get_db
 from src.backend.auth import get_current_team
 from src.backend.models import TeamOut, TeamPlayerOut, LineupUpdate
@@ -111,6 +112,162 @@ async def update_lineup(team_id: str, body: LineupUpdate, auth: dict = Depends(g
         if body.vice_captain:
             await db.execute("UPDATE team_players SET is_vice_captain=0 WHERE team_id=?", (team_id,))
             await db.execute("UPDATE team_players SET is_vice_captain=1 WHERE team_id=? AND player_id=?", (team_id, body.vice_captain))
+
+        await db.commit()
+        return {"ok": True}
+    finally:
+        await db.close()
+
+
+# --- Matchday-specific lineups ---
+
+@router.get("/teams/{team_id}/matchday-lineup/{matchday_id}")
+async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depends(get_current_team)):
+    """Get lineup for a specific matchday. Creates from defaults if not exists."""
+    db = await get_db()
+    try:
+        # Check if matchday lineup exists
+        existing = await db.execute_fetchall(
+            "SELECT COUNT(*) as cnt FROM matchday_lineups WHERE team_id=? AND matchday_id=?",
+            (team_id, matchday_id),
+        )
+        if existing[0]["cnt"] == 0:
+            # Copy from default team_players
+            defaults = await db.execute_fetchall(
+                "SELECT player_id, is_starter, is_captain, is_vice_captain FROM team_players WHERE team_id=?",
+                (team_id,),
+            )
+            for d in defaults:
+                d = dict(d)
+                await db.execute(
+                    "INSERT INTO matchday_lineups (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain) VALUES (?,?,?,?,?,?)",
+                    (team_id, matchday_id, d["player_id"], d["is_starter"], d["is_captain"], d["is_vice_captain"]),
+                )
+            await db.commit()
+
+        # Fetch lineup with player details
+        rows = await db.execute_fetchall(
+            """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain,
+                      p.name, p.country_code, p.position, p.club, p.photo, p.market_value,
+                      COALESCE(pts.total, 0) as total_points
+               FROM matchday_lineups ml
+               JOIN players p ON ml.player_id = p.id
+               LEFT JOIN (SELECT player_id, SUM(total_points) as total FROM match_scores GROUP BY player_id) pts
+                   ON pts.player_id = ml.player_id
+               WHERE ml.team_id=? AND ml.matchday_id=?
+               ORDER BY ml.is_starter DESC""",
+            (team_id, matchday_id),
+        )
+
+        # Get match kickoff times to determine lock status
+        matches = await db.execute_fetchall(
+            "SELECT home_country, away_country, kickoff, status FROM matches WHERE matchday_id=?",
+            (matchday_id,),
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        locked_countries = set()
+        for m in matches:
+            m = dict(m)
+            if m["status"] in ("live", "finished") or (m["kickoff"] and m["kickoff"] <= now):
+                locked_countries.add(m["home_country"])
+                locked_countries.add(m["away_country"])
+
+        players = []
+        for r in rows:
+            r = dict(r)
+            r["locked"] = r["country_code"] in locked_countries
+            players.append(r)
+
+        return {"matchday_id": matchday_id, "team_id": team_id, "players": players}
+    finally:
+        await db.close()
+
+
+@router.patch("/teams/{team_id}/matchday-lineup/{matchday_id}")
+async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpdate, auth: dict = Depends(get_current_team)):
+    """Update matchday-specific lineup with lock validation."""
+    if auth["team_id"] != team_id:
+        raise HTTPException(403, "Not your team")
+
+    db = await get_db()
+    try:
+        # Get locked countries (matches started or finished)
+        matches = await db.execute_fetchall(
+            "SELECT home_country, away_country, kickoff, status FROM matches WHERE matchday_id=?",
+            (matchday_id,),
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        locked_countries = set()
+        for m in matches:
+            m = dict(m)
+            if m["status"] in ("live", "finished") or (m["kickoff"] and m["kickoff"] <= now):
+                locked_countries.add(m["home_country"])
+                locked_countries.add(m["away_country"])
+
+        # Ensure matchday lineup exists
+        existing = await db.execute_fetchall(
+            "SELECT COUNT(*) as cnt FROM matchday_lineups WHERE team_id=? AND matchday_id=?",
+            (team_id, matchday_id),
+        )
+        if existing[0]["cnt"] == 0:
+            # Copy defaults first
+            defaults = await db.execute_fetchall(
+                "SELECT player_id, is_starter, is_captain, is_vice_captain FROM team_players WHERE team_id=?",
+                (team_id,),
+            )
+            for d in defaults:
+                d = dict(d)
+                await db.execute(
+                    "INSERT INTO matchday_lineups (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain) VALUES (?,?,?,?,?,?)",
+                    (team_id, matchday_id, d["player_id"], d["is_starter"], d["is_captain"], d["is_vice_captain"]),
+                )
+
+        if body.starters is not None:
+            if len(body.starters) > 11:
+                raise HTTPException(400, "Maximum 11 starters")
+
+            # Validate: can't ADD a locked player as starter (their match started)
+            current_starters = await db.execute_fetchall(
+                "SELECT ml.player_id FROM matchday_lineups ml WHERE ml.team_id=? AND ml.matchday_id=? AND ml.is_starter=1",
+                (team_id, matchday_id),
+            )
+            current_starter_ids = {dict(r)["player_id"] for r in current_starters}
+            new_starters = set(body.starters)
+
+            # Players being promoted from bench to starter
+            promoted = new_starters - current_starter_ids
+            for pid in promoted:
+                player = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (pid,))
+                if player and dict(player[0])["country_code"] in locked_countries:
+                    pname = await db.execute_fetchall("SELECT name FROM players WHERE id=?", (pid,))
+                    name = dict(pname[0])["name"] if pname else pid
+                    raise HTTPException(409, f"No puedes titular a {name}: su partido ya ha empezado")
+
+            # Update lineup
+            await db.execute(
+                "UPDATE matchday_lineups SET is_starter=0 WHERE team_id=? AND matchday_id=?",
+                (team_id, matchday_id),
+            )
+            for pid in body.starters:
+                await db.execute(
+                    "UPDATE matchday_lineups SET is_starter=1 WHERE team_id=? AND matchday_id=? AND player_id=?",
+                    (team_id, matchday_id, pid),
+                )
+
+        if body.captain:
+            # Can't set captain if locked
+            cp = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (body.captain,))
+            if cp and dict(cp[0])["country_code"] in locked_countries:
+                raise HTTPException(409, "No puedes cambiar el capitán: su partido ya ha empezado")
+            await db.execute("UPDATE matchday_lineups SET is_captain=0 WHERE team_id=? AND matchday_id=?", (team_id, matchday_id))
+            await db.execute("UPDATE matchday_lineups SET is_captain=1 WHERE team_id=? AND matchday_id=? AND player_id=?", (team_id, matchday_id, body.captain))
+
+        if body.vice_captain:
+            vcp = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (body.vice_captain,))
+            if vcp and dict(vcp[0])["country_code"] in locked_countries:
+                raise HTTPException(409, "No puedes cambiar el vice-capitán: su partido ya ha empezado")
+            await db.execute("UPDATE matchday_lineups SET is_vice_captain=0 WHERE team_id=? AND matchday_id=?", (team_id, matchday_id))
+            await db.execute("UPDATE matchday_lineups SET is_vice_captain=1 WHERE team_id=? AND matchday_id=? AND player_id=?", (team_id, matchday_id, body.vice_captain))
 
         await db.commit()
         return {"ok": True}

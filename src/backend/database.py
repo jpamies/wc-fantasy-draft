@@ -157,6 +157,18 @@ CREATE INDEX IF NOT EXISTS idx_match_scores_player ON match_scores(player_id);
 CREATE INDEX IF NOT EXISTS idx_match_scores_matchday ON match_scores(matchday_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_league ON transfers(league_id);
 CREATE INDEX IF NOT EXISTS idx_fantasy_teams_league ON fantasy_teams(league_id);
+
+CREATE TABLE IF NOT EXISTS matchday_lineups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    matchday_id TEXT NOT NULL REFERENCES matchdays(id),
+    player_id TEXT NOT NULL REFERENCES players(id),
+    is_starter INTEGER DEFAULT 0,
+    is_captain INTEGER DEFAULT 0,
+    is_vice_captain INTEGER DEFAULT 0,
+    UNIQUE(team_id, matchday_id, player_id)
+);
+CREATE INDEX IF NOT EXISTS idx_matchday_lineups_team ON matchday_lineups(team_id, matchday_id);
 """
 
 
