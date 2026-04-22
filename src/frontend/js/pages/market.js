@@ -23,7 +23,7 @@ Router.register('#/market', async (container) => {
                             <img src="${p.photo}" alt="" onerror="this.style.display='none'">
                             <div class="player-info">
                                 <div class="player-name">${p.name}</div>
-                                <div class="player-meta">${p.club} · ${p.country_code}</div>
+                                <div class="player-meta">${p.country_code} · ${p.club}</div>
                             </div>
                             ${posBadge(p.position)}
                             <div class="player-value">${formatMoney(p.market_value)}</div>

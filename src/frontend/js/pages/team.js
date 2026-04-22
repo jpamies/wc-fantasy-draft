@@ -120,7 +120,7 @@ Router.register('#/team', async (container) => {
                             ${p.player_id === viceCaptainId ? '<span class="chip-badge vc">VC</span>' : ''}
                             ${p.name} ${locked ? '🔒' : ''}
                         </div>
-                        <div class="player-meta">${p.club}</div>
+                        <div class="player-meta">${p.country_code} · ${p.club}</div>
                     </div>
                     ${posBadge(p.position)}
                     <span style="font-weight:700;color:var(--accent-teal);min-width:30px;text-align:right;font-size:.9rem">${pts > 0 ? pts : ''}</span>
