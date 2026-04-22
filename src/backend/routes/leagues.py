@@ -243,10 +243,19 @@ async def leave_league(league_id: str, auth: dict = Depends(get_current_team)):
         raise HTTPException(409, "Commissioner cannot leave — delete the league instead")
     db = await get_db()
     try:
-        # Delete team's players first
-        await db.execute("DELETE FROM team_players WHERE team_id=?", (auth["team_id"],))
+        team_id = auth["team_id"]
+        # Delete draft picks for this team
+        await db.execute(
+            "DELETE FROM draft_picks WHERE team_id=?", (team_id,)
+        )
+        # Delete transfers involving this team
+        await db.execute(
+            "DELETE FROM transfers WHERE from_team_id=? OR to_team_id=?", (team_id, team_id)
+        )
+        # Delete team's players
+        await db.execute("DELETE FROM team_players WHERE team_id=?", (team_id,))
         # Delete the team
-        await db.execute("DELETE FROM fantasy_teams WHERE id=?", (auth["team_id"],))
+        await db.execute("DELETE FROM fantasy_teams WHERE id=?", (team_id,))
         await db.commit()
         return {"ok": True}
     finally:
@@ -261,6 +270,15 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         raise HTTPException(403, "Commissioner only")
     db = await get_db()
     try:
+        # Get draft id for this league
+        draft_rows = await db.execute_fetchall(
+            "SELECT id FROM drafts WHERE league_id=?", (league_id,)
+        )
+        for d in draft_rows:
+            await db.execute("DELETE FROM draft_picks WHERE draft_id=?", (dict(d)["id"],))
+        await db.execute("DELETE FROM drafts WHERE league_id=?", (league_id,))
+        # Delete transfers
+        await db.execute("DELETE FROM transfers WHERE league_id=?", (league_id,))
         # Delete all team players in this league
         await db.execute(
             "DELETE FROM team_players WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
