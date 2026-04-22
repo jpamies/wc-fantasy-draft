@@ -104,6 +104,10 @@ Router.register('#/team', async (container) => {
             return getPositionCounts()[pos] < POS_LIMITS[pos].max;
         }
 
+        function validateGK() {
+            return getPositionCounts().GK >= 1;
+        }
+
         function renderChip(p, actions) {
             const pts = p.total_points || 0;
             const locked = p.locked;
@@ -142,6 +146,8 @@ Router.register('#/team', async (container) => {
                         </div>
                     </div>
                 </div>
+
+                ${starterIds.size > 0 && !validateGK() ? '<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ Necesitas al menos 1 portero (GK) titular</div>' : ''}
 
                 <div class="grid grid-2">
                     <div class="card">
@@ -213,6 +219,10 @@ Router.register('#/team', async (container) => {
                 });
             });
             document.getElementById('btn-save-md-lineup')?.addEventListener('click', async () => {
+                if (starterIds.size === 11 && !validateGK()) {
+                    showToast('⚠️ Necesitas al menos 1 portero (GK) titular', 'error');
+                    return;
+                }
                 const payload = { starters: [...starterIds] };
                 if (captainId) payload.captain = captainId;
                 if (viceCaptainId) payload.vice_captain = viceCaptainId;

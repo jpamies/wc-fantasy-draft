@@ -104,13 +104,12 @@ async function loadMatchday(container, mdId) {
     });
 
     function renderMatchPlayers(matchId, countryCode) {
-        const players = (scoresByMatch[matchId]?.[countryCode] || [])
-            .sort((a, b) => b.minutes_played - a.minutes_played || b.total_points - a.total_points);
-        const starters = players.filter(p => p.minutes_played >= 60 || (p.minutes_played > 0 && p.minutes_played < 60 && players.filter(x => x.minutes_played >= 60).length < 11));
-        // Simple: top 11 by minutes = starters, rest = subs
+        const posOrder = {GK:0, DEF:1, MID:2, FWD:3};
+        const players = (scoresByMatch[matchId]?.[countryCode] || []);
+        // Top 11 by minutes = starters, rest = subs
         const sorted = [...players].sort((a, b) => b.minutes_played - a.minutes_played);
-        const starting = sorted.slice(0, 11);
-        const subs = sorted.slice(11);
+        const starting = sorted.slice(0, 11).sort((a, b) => (posOrder[a.position]||9) - (posOrder[b.position]||9));
+        const subs = sorted.slice(11).sort((a, b) => (posOrder[a.position]||9) - (posOrder[b.position]||9));
 
         function playerRow(p) {
             return `<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.85rem">
