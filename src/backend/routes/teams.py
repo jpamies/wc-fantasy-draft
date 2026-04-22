@@ -27,8 +27,13 @@ async def get_team(team_id: str):
 
         players = await db.execute_fetchall(
             """SELECT tp.*, p.name, p.country_code, p.position, p.detailed_position,
-                      p.club, p.photo, p.market_value, p.clause_value
+                      p.club, p.photo, p.market_value, p.clause_value,
+                      COALESCE(pts.total, 0) as total_points
                FROM team_players tp JOIN players p ON tp.player_id=p.id
+               LEFT JOIN (
+                   SELECT player_id, SUM(total_points) as total
+                   FROM match_scores GROUP BY player_id
+               ) pts ON pts.player_id = tp.player_id
                WHERE tp.team_id=? ORDER BY tp.is_starter DESC, tp.bench_order ASC""",
             (team_id,),
         )
@@ -41,6 +46,7 @@ async def get_team(team_id: str):
                 position_slot=p["position_slot"] or "", is_captain=bool(p["is_captain"]),
                 is_vice_captain=bool(p["is_vice_captain"]),
                 bench_order=p["bench_order"], acquired_via=p["acquired_via"],
+                total_points=p["total_points"],
             ).model_dump()
             for p in players
         ]

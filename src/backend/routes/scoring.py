@@ -120,6 +120,33 @@ async def submit_scores(matchday_id: str, body: ScoreBatchEntry, auth: dict = De
     return {"ok": True, "scores": results}
 
 
+@router.get("/scoring/matchdays/{matchday_id}/fantasy-points")
+async def get_fantasy_points(matchday_id: str, auth: dict = Depends(get_current_team)):
+    """Get all fantasy teams' points for a specific matchday."""
+    from src.backend.services.scoring_engine import ScoringEngine
+    league_id = auth["league_id"]
+    db = await get_db()
+    try:
+        teams = await db.execute_fetchall(
+            "SELECT id, team_name, owner_nick, display_name FROM fantasy_teams WHERE league_id=?",
+            (league_id,),
+        )
+        results = []
+        for t in teams:
+            t = dict(t)
+            pts = await ScoringEngine.get_team_matchday_points(t["id"], matchday_id)
+            results.append({
+                "team_id": t["id"],
+                "team_name": t["team_name"],
+                "display_name": t.get("display_name") or t["owner_nick"],
+                "points": pts,
+            })
+        results.sort(key=lambda x: x["points"], reverse=True)
+        return results
+    finally:
+        await db.close()
+
+
 @router.post("/scoring/populate-calendar")
 async def populate_calendar(auth: dict = Depends(get_current_team)):
     """Pre-populate matchdays and matches from data/tournament/calendar.json. Commissioner only."""

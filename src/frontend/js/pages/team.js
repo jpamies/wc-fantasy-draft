@@ -55,6 +55,7 @@ Router.register('#/team', async (container) => {
     }
 
     function renderPlayerChip(p, actions) {
+        const pts = p.total_points || 0;
         return `
             <div class="player-chip">
                 <img src="${p.photo}" alt="" onerror="this.style.display='none'">
@@ -65,6 +66,7 @@ Router.register('#/team', async (container) => {
                     <div class="player-meta">${p.club}</div>
                 </div>
                 ${posBadge(p.position)}
+                <span style="font-weight:700;color:var(--accent-teal);min-width:30px;text-align:right;font-size:.9rem" title="Puntos acumulados">${pts > 0 ? pts : ''}</span>
                 <div class="chip-actions">${actions}</div>
             </div>`;
     }

@@ -84,7 +84,42 @@ Router.register('#/scoring', async (container) => {
 async function loadMatchday(container, mdId) {
     const md = await API.get(`/scoring/matchdays/${mdId}`);
     const isComm = API.isCommissioner();
-    const leagueId = API.getLeagueId();
+
+    // Group scores by match_id and country
+    const scoresByMatch = {};
+    md.scores.forEach(s => {
+        if (!scoresByMatch[s.match_id]) scoresByMatch[s.match_id] = {};
+        if (!scoresByMatch[s.match_id][s.country_code]) scoresByMatch[s.match_id][s.country_code] = [];
+        scoresByMatch[s.match_id][s.country_code].push(s);
+    });
+
+    function renderMatchPlayers(matchId, countryCode) {
+        const players = (scoresByMatch[matchId]?.[countryCode] || [])
+            .sort((a, b) => b.minutes_played - a.minutes_played || b.total_points - a.total_points);
+        const starters = players.filter(p => p.minutes_played >= 60 || (p.minutes_played > 0 && p.minutes_played < 60 && players.filter(x => x.minutes_played >= 60).length < 11));
+        // Simple: top 11 by minutes = starters, rest = subs
+        const sorted = [...players].sort((a, b) => b.minutes_played - a.minutes_played);
+        const starting = sorted.slice(0, 11);
+        const subs = sorted.slice(11);
+
+        function playerRow(p) {
+            return `<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.85rem">
+                ${posBadge(p.position)}
+                <span style="flex:1">${p.player_name}</span>
+                <span style="color:var(--text-muted)">${p.minutes_played}'</span>
+                ${p.goals ? `<span>⚽×${p.goals}</span>` : ''}
+                ${p.assists ? `<span>🅰️×${p.assists}</span>` : ''}
+                ${p.yellow_cards ? '🟨' : ''}${p.red_card ? '🟥' : ''}
+                <span style="font-weight:700;color:var(--accent-teal);min-width:28px;text-align:right">${p.total_points}</span>
+            </div>`;
+        }
+
+        if (!players.length) return '<p style="color:var(--text-muted);font-size:.8rem;margin:.5rem 0">Sin datos</p>';
+        return `
+            ${starting.length ? `<div style="margin-bottom:.5rem"><small style="color:var(--text-secondary)">Titulares</small>${starting.map(playerRow).join('')}</div>` : ''}
+            ${subs.length ? `<div><small style="color:var(--text-secondary)">Suplentes</small>${subs.map(playerRow).join('')}</div>` : ''}
+        `;
+    }
 
     container.innerHTML = `
         <div class="flex-between mb-2">
@@ -92,60 +127,92 @@ async function loadMatchday(container, mdId) {
                 <a href="#/scoring" style="font-size:.85rem">← Volver</a>
                 <h2>${md.name}</h2>
             </div>
-            <span class="badge ${md.status === 'completed' ? 'badge-teal' : 'badge-gold'}">${md.status}</span>
+            <div class="flex" style="gap:.5rem;align-items:center">
+                <span class="badge ${md.status === 'completed' ? 'badge-teal' : 'badge-gold'}">${md.status}</span>
+                ${isComm && md.status !== 'completed' ? `<button class="btn btn-sm btn-outline" id="btn-simulate">🎲 Simular</button>` : ''}
+                ${isComm ? `<button class="btn btn-sm btn-primary" id="btn-add-match">+ Partido</button>` : ''}
+            </div>
         </div>
 
         <div class="card mb-2">
-            <div class="flex-between mb-1">
-                <div class="card-header" style="margin:0">Partidos</div>
-                <div class="flex" style="gap:.5rem">
-                    ${isComm && md.status !== 'completed' ? `<button class="btn btn-sm btn-outline" id="btn-simulate" title="Simular puntuaciones aleatorias para testing">🎲 Simular</button>` : ''}
-                    ${isComm ? `<button class="btn btn-sm btn-primary" id="btn-add-match">+ Añadir partido</button>` : ''}
-                </div>
-            </div>
+            <div class="card-header">Partidos</div>
             ${md.matches.length === 0 ? '<p style="color:var(--text-muted)">Sin partidos</p>' : ''}
-            ${md.matches.map(m => `
-                <div style="padding:.6rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:1rem">
-                    <span>${m.home_flag} <strong>${m.home_name}</strong></span>
-                    <span style="font-size:1.2rem;font-weight:700;color:var(--accent-gold)">
-                        ${m.score_home != null ? `${m.score_home} - ${m.score_away}` : 'vs'}
-                    </span>
-                    <span><strong>${m.away_name}</strong> ${m.away_flag}</span>
-                    <span class="badge ${m.status === 'finished' ? 'badge-teal' : 'badge-gold'}" style="margin-left:auto">${m.status}</span>
-                    ${isComm && m.status !== 'finished' ? `
-                        <button class="btn btn-sm btn-outline result-btn" data-mid="${m.id}" data-home="${m.home_country}" data-away="${m.away_country}">Resultado</button>
-                    ` : ''}
-                    ${isComm ? `<button class="btn btn-sm btn-primary scores-btn" data-mid="${m.id}" data-home="${m.home_country}" data-away="${m.away_country}">Scores</button>` : ''}
-                </div>
-            `).join('')}
+            ${md.matches.map(m => {
+                const hasScores = scoresByMatch[m.id] && Object.keys(scoresByMatch[m.id]).length > 0;
+                return `
+                <div class="match-accordion" style="border-bottom:1px solid var(--border)">
+                    <div class="match-header" data-mid="${m.id}" style="padding:.75rem;display:flex;align-items:center;gap:1rem;cursor:${hasScores ? 'pointer' : 'default'}">
+                        <span>${m.home_flag} <strong>${m.home_name}</strong></span>
+                        <span style="font-size:1.3rem;font-weight:700;color:var(--accent-gold);min-width:50px;text-align:center">
+                            ${m.score_home != null ? `${m.score_home} - ${m.score_away}` : 'vs'}
+                        </span>
+                        <span><strong>${m.away_name}</strong> ${m.away_flag}</span>
+                        <span class="badge ${m.status === 'finished' ? 'badge-teal' : 'badge-gold'}" style="margin-left:auto;font-size:.75rem">${m.status}</span>
+                        ${hasScores ? '<span style="color:var(--text-muted);font-size:.8rem">▼</span>' : ''}
+                        ${isComm && m.status !== 'finished' ? `<button class="btn btn-sm btn-outline result-btn" data-mid="${m.id}" style="font-size:.75rem">Resultado</button>` : ''}
+                        ${isComm ? `<button class="btn btn-sm btn-primary scores-btn" data-mid="${m.id}" data-home="${m.home_country}" data-away="${m.away_country}" style="font-size:.75rem">Scores</button>` : ''}
+                    </div>
+                    <div class="match-detail" id="detail-${m.id}" style="display:none;padding:0 .75rem .75rem">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                            <div>
+                                <div style="font-weight:600;margin-bottom:.5rem">${m.home_flag} ${m.home_name}</div>
+                                ${renderMatchPlayers(m.id, m.home_country)}
+                            </div>
+                            <div>
+                                <div style="font-weight:600;margin-bottom:.5rem">${m.away_name} ${m.away_flag}</div>
+                                ${renderMatchPlayers(m.id, m.away_country)}
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('')}
         </div>
 
-        ${md.scores.length > 0 ? `
-        <div class="card">
-            <div class="card-header">Puntuaciones</div>
-            <table>
-                <thead><tr><th>Jugador</th><th>Pos</th><th>Min</th><th>Goles</th><th>Asist</th><th>TA</th><th>Puntos</th></tr></thead>
-                <tbody>
-                    ${md.scores.map(s => `
-                        <tr>
-                            <td>${s.player_name} <small style="color:var(--text-muted)">${s.country_code}</small></td>
-                            <td>${posBadge(s.position)}</td>
-                            <td>${s.minutes_played}'</td>
-                            <td>${s.goals || ''}</td>
-                            <td>${s.assists || ''}</td>
-                            <td>${s.yellow_cards ? '🟨' : ''}${s.red_card ? '🟥' : ''}</td>
-                            <td style="font-weight:700;color:var(--accent-teal)">${s.total_points}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
+        <div class="card" id="fantasy-points-card">
+            <div class="card-header">Puntos de equipos — ${md.name}</div>
+            <div id="fantasy-points-body" style="color:var(--text-muted);padding:.5rem">Cargando...</div>
         </div>
-        ` : ''}
     `;
+
+    // Accordion toggle
+    container.querySelectorAll('.match-header').forEach(header => {
+        header.addEventListener('click', (e) => {
+            if (e.target.closest('.btn')) return; // Don't toggle when clicking buttons
+            const detail = document.getElementById('detail-' + header.dataset.mid);
+            if (detail && detail.innerHTML.trim()) {
+                detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+            }
+        });
+    });
+
+    // Load fantasy team points
+    try {
+        const fp = await API.get(`/scoring/matchdays/${mdId}/fantasy-points`);
+        const fpBody = document.getElementById('fantasy-points-body');
+        if (fp.length === 0 || fp.every(t => t.points === 0)) {
+            fpBody.innerHTML = '<p style="color:var(--text-muted)">Sin puntuaciones todavía para esta jornada</p>';
+        } else {
+            fpBody.innerHTML = `
+                <table>
+                    <thead><tr><th>#</th><th>Equipo</th><th>Manager</th><th>Puntos</th></tr></thead>
+                    <tbody>
+                        ${fp.map((t, i) => `
+                            <tr class="${t.team_id === API.getTeamId() ? 'rank-1' : ''}">
+                                <td class="${i < 3 ? `rank-${i+1}` : ''}">${i + 1}</td>
+                                <td><strong>${t.team_name}</strong></td>
+                                <td>${t.display_name}</td>
+                                <td style="font-weight:700;color:var(--accent-teal)">${t.points}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+    } catch {}
 
     // Simulate scores
     document.getElementById('btn-simulate')?.addEventListener('click', async () => {
-        if (!confirm('¿Simular puntuaciones aleatorias para esta jornada? Los resultados existentes se sobrescribirán.')) return;
+        if (!confirm('¿Simular puntuaciones aleatorias para esta jornada?')) return;
         try {
             await API.post(`/scoring/matchdays/${mdId}/simulate`);
             showToast('Puntuaciones simuladas', 'success');
@@ -188,7 +255,8 @@ async function loadMatchday(container, mdId) {
 
     // Match result
     container.querySelectorAll('.result-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
             showModal(`
                 <div class="modal-title">Resultado</div>
                 <div class="flex" style="justify-content:center;gap:1rem;margin:1rem 0">
@@ -214,11 +282,11 @@ async function loadMatchday(container, mdId) {
 
     // Enter scores
     container.querySelectorAll('.scores-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
             const home = btn.dataset.home;
             const away = btn.dataset.away;
             const matchId = btn.dataset.mid;
-            // Get players from both countries
             const homePlayers = await API.get(`/players?country=${home}&limit=50`);
             const awayPlayers = await API.get(`/players?country=${away}&limit=50`);
             const allPlayers = [...homePlayers, ...awayPlayers];

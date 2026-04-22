@@ -109,6 +109,7 @@ class TeamPlayerOut(BaseModel):
     is_vice_captain: bool = False
     bench_order: int = 0
     acquired_via: str = "draft"
+    total_points: int = 0
 
 class LineupUpdate(BaseModel):
     formation: Optional[str] = None
