@@ -200,8 +200,8 @@ async def _process_and_broadcast_autodraft(league_id: str):
             "state": state,
             "autodraft": True,
         })
-        # Small delay so clients can process each pick visually
-        await asyncio.sleep(0.3)
+        # Delay between autodraft picks so clients can follow progress
+        await asyncio.sleep(1.0)
 
 
 @router.websocket("/leagues/{league_id}/draft/ws")
