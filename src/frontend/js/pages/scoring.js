@@ -8,6 +8,7 @@ Router.register('#/scoring', async (container) => {
             <h2>⚽ Puntuación</h2>
             <div class="flex" style="gap:.5rem">
                 ${isComm && matchdays.length === 0 ? '<button class="btn btn-primary" id="btn-populate-calendar">📅 Cargar Calendario WC2026</button>' : ''}
+                ${isComm && matchdays.length > 0 ? '<button class="btn btn-sm" id="btn-reset-all" style="background:var(--accent-red,#e74c3c);color:#fff;font-size:.75rem">🗑️ Reset todo</button>' : ''}
                 ${isComm ? '<button class="btn btn-gold" id="btn-new-matchday">+ Crear Jornada</button>' : ''}
             </div>
         </div>
@@ -42,6 +43,15 @@ Router.register('#/scoring', async (container) => {
         try {
             const res = await API.post('/scoring/populate-calendar');
             showToast(`Calendario cargado: ${res.matchdays_created} jornadas, ${res.matches_created} partidos`, 'success');
+            Router.handleRoute();
+        } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    document.getElementById('btn-reset-all')?.addEventListener('click', async () => {
+        if (!confirm('⚠️ ¿Borrar TODAS las jornadas, partidos y puntuaciones? Esta acción no se puede deshacer.')) return;
+        try {
+            await API.delete('/scoring/reset-all');
+            showToast('Todo reseteado', 'success');
             Router.handleRoute();
         } catch (err) { showToast(err.message, 'error'); }
     });
@@ -129,7 +139,8 @@ async function loadMatchday(container, mdId) {
             </div>
             <div class="flex" style="gap:.5rem;align-items:center">
                 <span class="badge ${md.status === 'completed' ? 'badge-teal' : 'badge-gold'}">${md.status}</span>
-                ${isComm && md.status !== 'completed' ? `<button class="btn btn-sm btn-outline" id="btn-simulate">🎲 Simular</button>` : ''}
+                ${isComm ? `<button class="btn btn-sm btn-outline" id="btn-simulate">🎲 Simular</button>` : ''}
+                ${isComm && md.status === 'completed' ? `<button class="btn btn-sm" id="btn-reset-md" style="background:var(--accent-red,#e74c3c);color:#fff;font-size:.7rem">↺ Reset</button>` : ''}
                 ${isComm ? `<button class="btn btn-sm btn-primary" id="btn-add-match">+ Partido</button>` : ''}
             </div>
         </div>
@@ -216,6 +227,16 @@ async function loadMatchday(container, mdId) {
         try {
             await API.post(`/scoring/matchdays/${mdId}/simulate`);
             showToast('Puntuaciones simuladas', 'success');
+            loadMatchday(container, mdId);
+        } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    // Reset matchday scores
+    document.getElementById('btn-reset-md')?.addEventListener('click', async () => {
+        if (!confirm('¿Resetear todas las puntuaciones de esta jornada?')) return;
+        try {
+            await API.post(`/scoring/matchdays/${mdId}/reset`);
+            showToast('Jornada reseteada', 'success');
             loadMatchday(container, mdId);
         } catch (err) { showToast(err.message, 'error'); }
     });

@@ -3,14 +3,22 @@ Router.register('#/team', async (container) => {
     const teamId = API.getTeamId();
     const team = await API.get(`/teams/${teamId}`);
 
-    // Get matchdays to show tabs (upcoming + active)
+    // Get matchdays to show tabs
     let matchdays = [];
     try {
         const allMd = await API.get('/scoring/matchdays');
-        matchdays = allMd.filter(md => md.status !== 'completed').slice(0, 2);
-        // If no upcoming, show the last completed
+        // Show: active + upcoming first, then last completed as fallback
+        const active = allMd.filter(md => md.status === 'active' || md.status === 'upcoming');
+        const completed = allMd.filter(md => md.status === 'completed');
+        if (active.length > 0) {
+            matchdays = active.slice(0, 3);
+        } else if (completed.length > 0) {
+            // All completed — show last 2 so user can review
+            matchdays = completed.slice(-2);
+        }
+        // If nothing, show all available
         if (matchdays.length === 0 && allMd.length > 0) {
-            matchdays = [allMd[allMd.length - 1]];
+            matchdays = allMd.slice(0, 3);
         }
     } catch {}
 

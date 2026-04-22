@@ -194,3 +194,42 @@ async def simulate_matchday(matchday_id: str, auth: dict = Depends(get_current_t
     from src.scripts.fetch_scores import simulate_match_scores
     await simulate_match_scores(matchday_id)
     return {"ok": True}
+
+
+@router.post("/scoring/matchdays/{matchday_id}/reset")
+async def reset_matchday_scores(matchday_id: str, auth: dict = Depends(get_current_team)):
+    """Reset all scores and results for a matchday. Commissioner only."""
+    if not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+    db = await get_db()
+    try:
+        # Delete all match scores for this matchday
+        await db.execute("DELETE FROM match_scores WHERE matchday_id=?", (matchday_id,))
+        # Reset match results
+        await db.execute(
+            "UPDATE matches SET score_home=NULL, score_away=NULL, status='scheduled' WHERE matchday_id=?",
+            (matchday_id,),
+        )
+        # Reset matchday status
+        await db.execute("UPDATE matchdays SET status='upcoming' WHERE id=?", (matchday_id,))
+        await db.commit()
+        return {"ok": True}
+    finally:
+        await db.close()
+
+
+@router.delete("/scoring/reset-all")
+async def reset_all_scores(auth: dict = Depends(get_current_team)):
+    """Reset ALL matchdays, matches, and scores. Commissioner only."""
+    if not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM match_scores")
+        await db.execute("DELETE FROM matchday_lineups")
+        await db.execute("DELETE FROM matches")
+        await db.execute("DELETE FROM matchdays")
+        await db.commit()
+        return {"ok": True}
+    finally:
+        await db.close()
