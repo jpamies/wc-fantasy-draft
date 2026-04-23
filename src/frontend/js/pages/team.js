@@ -113,7 +113,7 @@ Router.register('#/team', async (container) => {
             const locked = p.locked;
             return `
                 <div class="player-chip" style="${locked ? 'opacity:.7;' : ''}">
-                    <img src="${p.photo}" alt="" onerror="this.style.display='none'">
+                    <img src="${p.photo}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'">
                     <div class="player-chip-info">
                         <div class="player-name">
                             ${p.player_id === captainId ? '<span class="chip-badge cap">C</span>' : ''}

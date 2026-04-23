@@ -20,7 +20,7 @@ Router.register('#/market', async (container) => {
                 <div style="max-height:500px;overflow-y:auto">
                     ${data.free_agents.map(p => `
                         <div class="player-card">
-                            <img src="${p.photo}" alt="" onerror="this.style.display='none'">
+                            <img src="${p.photo}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'">
                             <div class="player-info">
                                 <div class="player-name">${p.name}</div>
                                 <div class="player-meta">${p.country_code} · ${p.club}</div>
