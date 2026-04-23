@@ -252,6 +252,8 @@ async def leave_league(league_id: str, auth: dict = Depends(get_current_team)):
         await db.execute(
             "DELETE FROM transfers WHERE from_team_id=? OR to_team_id=?", (team_id, team_id)
         )
+        # Delete matchday lineups for this team
+        await db.execute("DELETE FROM matchday_lineups WHERE team_id=?", (team_id,))
         # Delete team's players
         await db.execute("DELETE FROM team_players WHERE team_id=?", (team_id,))
         # Delete the team
@@ -279,6 +281,11 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         await db.execute("DELETE FROM drafts WHERE league_id=?", (league_id,))
         # Delete transfers
         await db.execute("DELETE FROM transfers WHERE league_id=?", (league_id,))
+        # Delete matchday lineups for teams in this league
+        await db.execute(
+            "DELETE FROM matchday_lineups WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
+            (league_id,),
+        )
         # Delete all team players in this league
         await db.execute(
             "DELETE FROM team_players WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
