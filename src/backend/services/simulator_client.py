@@ -1,0 +1,124 @@
+"""HTTP client for wc-simulator API — fetches player data live."""
+import httpx
+from src.backend.config import settings
+
+_client: httpx.AsyncClient | None = None
+
+
+def get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            base_url=settings.SIMULATOR_API_URL.rstrip("/"),
+            timeout=10.0,
+        )
+    return _client
+
+
+async def close_client():
+    global _client
+    if _client and not _client.is_closed:
+        await _client.aclose()
+        _client = None
+
+
+def _to_fantasy_player(p: dict) -> dict:
+    """Map simulator PlayerOut fields to fantasy PlayerOut fields."""
+    mv = p.get("market_value", 0) or 0
+    return {
+        "id": p["id"],
+        "name": p["name"],
+        "country_code": p["country_code"],
+        "position": p["position"],
+        "detailed_position": p.get("detailed_position") or "",
+        "club": p.get("club") or "",
+        "club_logo": p.get("club_logo") or "",
+        "age": p.get("age") or 0,
+        "market_value": mv,
+        "photo": p.get("photo") or "",
+        "clause_value": int(mv * 1.5),
+    }
+
+
+async def fetch_players(
+    *,
+    country: str | None = None,
+    position: str | None = None,
+    search: str | None = None,
+    sort: str = "market_value",
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Fetch players from wc-simulator, mapped to fantasy format."""
+    params: dict = {"limit": limit, "offset": offset, "sort": sort}
+    if country:
+        params["country"] = country
+    if position:
+        params["position"] = position
+    if search:
+        params["search"] = search
+
+    client = get_client()
+    resp = await client.get("/api/v1/players", params=params)
+    resp.raise_for_status()
+    return [_to_fantasy_player(p) for p in resp.json()]
+
+
+async def fetch_player(player_id: str) -> dict | None:
+    """Fetch a single player from wc-simulator."""
+    client = get_client()
+    resp = await client.get(f"/api/v1/players/{player_id}")
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return _to_fantasy_player(resp.json())
+
+
+async def fetch_countries() -> list[dict]:
+    """Fetch countries list from wc-simulator."""
+    client = get_client()
+    resp = await client.get("/api/v1/countries")
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def fetch_squad_players(country_code: str) -> list[dict]:
+    """Fetch squad-selected players for a country."""
+    client = get_client()
+    resp = await client.get(f"/api/v1/squads/{country_code}")
+    if resp.status_code == 404:
+        return []
+    resp.raise_for_status()
+    return [_to_fantasy_player(p) for p in resp.json()]
+
+
+async def ensure_player_in_db(player_id: str) -> dict | None:
+    """Fetch player from simulator and upsert into local DB for FK integrity.
+    Returns the player dict or None if not found."""
+    player = await fetch_player(player_id)
+    if not player:
+        return None
+
+    from src.backend.database import get_db
+    db = await get_db()
+    try:
+        # Ensure country exists
+        await db.execute(
+            "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
+            (player["country_code"], player["country_code"]),
+        )
+        await db.execute(
+            """INSERT OR REPLACE INTO players
+               (id, name, country_code, position, detailed_position, club, club_logo, age, market_value, photo, clause_value)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                player["id"], player["name"], player["country_code"],
+                player["position"], player["detailed_position"],
+                player["club"], player["club_logo"], player["age"],
+                player["market_value"], player["photo"], player["clause_value"],
+            ),
+        )
+        await db.commit()
+        return player
+    finally:
+        await db.close()

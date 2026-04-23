@@ -4,6 +4,9 @@ import random
 from datetime import datetime, timezone
 
 from src.backend.database import get_db
+from src.backend.config import settings
+
+_use_simulator = bool(settings.SIMULATOR_API_URL)
 
 # In-memory autodraft state: { league_id: { team_id: True } }
 _autodraft_teams: dict[str, dict[str, bool]] = {}
@@ -108,13 +111,20 @@ class DraftEngine:
 
             # Count available players
             picked_ids = [p["player_id"] for p in picks]
-            if picked_ids:
+            if _use_simulator:
+                from src.backend.services.simulator_client import fetch_players
+                all_players = await fetch_players(limit=500)
+                picked_set = set(picked_ids)
+                available_count = sum(1 for p in all_players if p["id"] not in picked_set)
+            elif picked_ids:
                 placeholders = ",".join("?" for _ in picked_ids)
                 avail = await db.execute_fetchall(
                     f"SELECT COUNT(*) as cnt FROM players WHERE id NOT IN ({placeholders})", picked_ids
                 )
+                available_count = avail[0]["cnt"] if avail else 0
             else:
                 avail = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM players")
+                available_count = avail[0]["cnt"] if avail else 0
 
             return {
                 "id": draft["id"],
@@ -126,7 +136,7 @@ class DraftEngine:
                 "picks": [dict(p) for p in picks],
                 "current_team_id": current_team_id,
                 "current_team_name": current_team_name,
-                "available_count": avail[0]["cnt"] if avail else 0,
+                "available_count": available_count,
             }
         finally:
             await db.close()
@@ -163,11 +173,19 @@ class DraftEngine:
             if existing:
                 return {"error": "Player already drafted"}
 
-            # Check player exists
-            player = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
-            if not player:
-                return {"error": "Player not found"}
-            player = dict(player[0])
+            # Check player exists (from simulator or local DB)
+            if _use_simulator:
+                from src.backend.services.simulator_client import ensure_player_in_db
+                player_data = await ensure_player_in_db(player_id)
+                if not player_data:
+                    return {"error": "Player not found"}
+                player = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
+                player = dict(player[0])
+            else:
+                player = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
+                if not player:
+                    return {"error": "Player not found"}
+                player = dict(player[0])
 
             # Check position minimums won't be violated (max 23 players total)
             team_players = await db.execute_fetchall(
@@ -241,21 +259,28 @@ class DraftEngine:
             draft_id = drafts[0]["id"]
 
             picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
-            picked_ids = [p["player_id"] for p in picked]
+            picked_ids = set(p["player_id"] for p in picked)
 
             for pos in preferences:
-                if picked_ids:
-                    placeholders = ",".join("?" for _ in picked_ids)
-                    candidates = await db.execute_fetchall(
-                        f"SELECT id FROM players WHERE position=? AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
-                        [pos] + picked_ids,
-                    )
+                if _use_simulator:
+                    from src.backend.services.simulator_client import fetch_players
+                    candidates = await fetch_players(position=pos, limit=20)
+                    available = [p for p in candidates if p["id"] not in picked_ids]
+                    if available:
+                        return await DraftEngine.make_pick(league_id, team_id, available[0]["id"])
                 else:
-                    candidates = await db.execute_fetchall(
-                        "SELECT id FROM players WHERE position=? ORDER BY market_value DESC LIMIT 1", (pos,)
-                    )
-                if candidates:
-                    return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
+                    if picked_ids:
+                        placeholders = ",".join("?" for _ in picked_ids)
+                        candidates = await db.execute_fetchall(
+                            f"SELECT id FROM players WHERE position=? AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
+                            [pos] + list(picked_ids),
+                        )
+                    else:
+                        candidates = await db.execute_fetchall(
+                            "SELECT id FROM players WHERE position=? ORDER BY market_value DESC LIMIT 1", (pos,)
+                        )
+                    if candidates:
+                        return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
 
             return {"error": "No players available"}
         finally:
@@ -271,7 +296,14 @@ class DraftEngine:
             draft_id = drafts[0]["id"]
 
             picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
-            picked_ids = [p["player_id"] for p in picked]
+            picked_ids = set(p["player_id"] for p in picked)
+
+            if _use_simulator:
+                from src.backend.services.simulator_client import fetch_players
+                players = await fetch_players(
+                    position=position, search=search, limit=500, offset=0,
+                )
+                return [p for p in players if p["id"] not in picked_ids][:100]
 
             where = []
             params: list = []
@@ -373,18 +405,25 @@ class DraftEngine:
 
             # Try to pick from each priority position
             for pos in priority_positions:
-                if picked_ids:
-                    placeholders = ",".join("?" for _ in picked_ids)
-                    candidates = await db.execute_fetchall(
-                        f"SELECT id FROM players WHERE position=? AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
-                        [pos] + picked_ids,
-                    )
+                if _use_simulator:
+                    from src.backend.services.simulator_client import fetch_players
+                    candidates = await fetch_players(position=pos, limit=20)
+                    available = [p for p in candidates if p["id"] not in picked_ids]
+                    if available:
+                        return await DraftEngine.make_pick(league_id, team_id, available[0]["id"])
                 else:
-                    candidates = await db.execute_fetchall(
-                        "SELECT id FROM players WHERE position=? ORDER BY market_value DESC LIMIT 1", (pos,)
-                    )
-                if candidates:
-                    return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
+                    if picked_ids:
+                        placeholders = ",".join("?" for _ in picked_ids)
+                        candidates = await db.execute_fetchall(
+                            f"SELECT id FROM players WHERE position=? AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
+                            [pos] + picked_ids,
+                        )
+                    else:
+                        candidates = await db.execute_fetchall(
+                            "SELECT id FROM players WHERE position=? ORDER BY market_value DESC LIMIT 1", (pos,)
+                        )
+                    if candidates:
+                        return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
 
             return {"error": "No players available"}
         finally:

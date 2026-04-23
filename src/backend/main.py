@@ -5,28 +5,40 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.backend.database import init_db
-from src.scripts.import_players import import_data
+from src.backend.config import settings
 from src.backend.routes import leagues, players, teams, draft, market, scoring
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize database and import player data on startup
+    # Initialize database
     print("Initializing database...")
     await init_db()
-    # Only import if players table is empty
-    from src.backend.database import get_db
-    db = await get_db()
-    try:
-        rows = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM players")
-        if rows[0]["cnt"] == 0:
-            print("Importing player data from transfermarkt JSONs...")
-            await import_data()
-        else:
-            print(f"Database has {rows[0]['cnt']} players, skipping import.")
-    finally:
-        await db.close()
+
+    if settings.SIMULATOR_API_URL:
+        print(f"Simulator API configured: {settings.SIMULATOR_API_URL}")
+        print("Player data will be fetched live from wc-simulator.")
+    else:
+        # Only import from local JSON if no simulator configured
+        from src.scripts.import_players import import_data
+        from src.backend.database import get_db
+        db = await get_db()
+        try:
+            rows = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM players")
+            if rows[0]["cnt"] == 0:
+                print("Importing player data from transfermarkt JSONs...")
+                await import_data()
+            else:
+                print(f"Database has {rows[0]['cnt']} players, skipping import.")
+        finally:
+            await db.close()
+
     yield
+
+    # Cleanup httpx client on shutdown
+    if settings.SIMULATOR_API_URL:
+        from src.backend.services.simulator_client import close_client
+        await close_client()
 
 
 app = FastAPI(

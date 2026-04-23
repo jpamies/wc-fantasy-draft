@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Query
-from src.backend.database import get_db
+from fastapi import APIRouter, HTTPException, Query
+from src.backend.config import settings
 from src.backend.models import PlayerOut, CountryOut
 
 router = APIRouter(prefix="/api/v1", tags=["players"])
+
+_use_simulator = bool(settings.SIMULATOR_API_URL)
 
 
 @router.get("/players", response_model=list[PlayerOut])
@@ -15,6 +17,15 @@ async def list_players(
     limit: int = Query(50, le=500),
     offset: int = 0,
 ):
+    if _use_simulator:
+        from src.backend.services.simulator_client import fetch_players
+        rows = await fetch_players(
+            country=country, position=position, search=search,
+            sort=sort, limit=limit, offset=offset,
+        )
+        return [PlayerOut(**r) for r in rows]
+
+    from src.backend.database import get_db
     db = await get_db()
     try:
         where = []
@@ -45,11 +56,18 @@ async def list_players(
 
 @router.get("/players/{player_id}", response_model=PlayerOut)
 async def get_player(player_id: str):
+    if _use_simulator:
+        from src.backend.services.simulator_client import fetch_player
+        p = await fetch_player(player_id)
+        if not p:
+            raise HTTPException(404, "Player not found")
+        return PlayerOut(**p)
+
+    from src.backend.database import get_db
     db = await get_db()
     try:
         rows = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
         if not rows:
-            from fastapi import HTTPException
             raise HTTPException(404, "Player not found")
         return PlayerOut(**dict(rows[0]))
     finally:
@@ -58,6 +76,11 @@ async def get_player(player_id: str):
 
 @router.get("/countries", response_model=list[CountryOut])
 async def list_countries():
+    if _use_simulator:
+        from src.backend.services.simulator_client import fetch_countries
+        return [CountryOut(**c) for c in await fetch_countries()]
+
+    from src.backend.database import get_db
     db = await get_db()
     try:
         rows = await db.execute_fetchall(

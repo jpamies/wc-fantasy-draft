@@ -244,6 +244,11 @@ class MarketEngine:
                 # Check budget still sufficient
                 buyer = await db.execute_fetchall("SELECT budget FROM fantasy_teams WHERE id=?", (team_id,))
                 if buyer and buyer[0]["budget"] >= bid["amount"]:
+                    # Ensure player exists in local DB (for FK integrity when using simulator)
+                    from src.backend.config import settings
+                    if settings.SIMULATOR_API_URL:
+                        from src.backend.services.simulator_client import ensure_player_in_db
+                        await ensure_player_in_db(bid["player_id"])
                     await db.execute(
                         "INSERT OR IGNORE INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES (?,?,?,?)",
                         (team_id, bid["player_id"], "free_market", now),
@@ -268,12 +273,19 @@ class MarketEngine:
                    JOIN fantasy_teams ft ON tp.team_id=ft.id WHERE ft.league_id=?""",
                 (league_id,),
             )
-            owned_ids = [r["player_id"] for r in owned]
+            owned_ids = set(r["player_id"] for r in owned)
+
+            from src.backend.config import settings
+            if settings.SIMULATOR_API_URL:
+                from src.backend.services.simulator_client import fetch_players
+                players = await fetch_players(limit=500)
+                return [p for p in players if p["id"] not in owned_ids][:100]
+
             if owned_ids:
                 placeholders = ",".join("?" for _ in owned_ids)
                 rows = await db.execute_fetchall(
                     f"SELECT * FROM players WHERE id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 100",
-                    owned_ids,
+                    list(owned_ids),
                 )
             else:
                 rows = await db.execute_fetchall("SELECT * FROM players ORDER BY market_value DESC LIMIT 100")
