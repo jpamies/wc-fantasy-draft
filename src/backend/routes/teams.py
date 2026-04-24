@@ -19,6 +19,12 @@ FORMATIONS = {
 
 @router.get("/teams/{team_id}", response_model=TeamOut)
 async def get_team(team_id: str):
+    # Backfill any missing players from simulator
+    from src.backend.config import settings
+    if settings.SIMULATOR_API_URL:
+        from src.backend.services.simulator_client import ensure_team_players_in_db
+        await ensure_team_players_in_db(team_id)
+
     db = await get_db()
     try:
         rows = await db.execute_fetchall("SELECT * FROM fantasy_teams WHERE id=?", (team_id,))
@@ -124,6 +130,12 @@ async def update_lineup(team_id: str, body: LineupUpdate, auth: dict = Depends(g
 @router.get("/teams/{team_id}/matchday-lineup/{matchday_id}")
 async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depends(get_current_team)):
     """Get lineup for a specific matchday. Creates from defaults if not exists."""
+    # Backfill any missing players from simulator
+    from src.backend.config import settings
+    if settings.SIMULATOR_API_URL:
+        from src.backend.services.simulator_client import ensure_team_players_in_db
+        await ensure_team_players_in_db(team_id)
+
     db = await get_db()
     try:
         # Check if matchday lineup exists

@@ -122,3 +122,23 @@ async def ensure_player_in_db(player_id: str) -> dict | None:
         return player
     finally:
         await db.close()
+
+
+async def ensure_team_players_in_db(team_id: str):
+    """Ensure all players owned by a team exist in the local players table.
+    Fetches missing ones from the simulator."""
+    from src.backend.database import get_db
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            """SELECT tp.player_id FROM team_players tp
+               LEFT JOIN players p ON tp.player_id = p.id
+               WHERE tp.team_id = ? AND p.id IS NULL""",
+            (team_id,),
+        )
+        missing_ids = [r["player_id"] for r in rows]
+    finally:
+        await db.close()
+
+    for pid in missing_ids:
+        await ensure_player_in_db(pid)
