@@ -169,6 +169,15 @@ CREATE TABLE IF NOT EXISTS matchday_lineups (
     UNIQUE(team_id, matchday_id, player_id)
 );
 CREATE INDEX IF NOT EXISTS idx_matchday_lineups_team ON matchday_lineups(team_id, matchday_id);
+
+CREATE TABLE IF NOT EXISTS draft_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id TEXT NOT NULL REFERENCES drafts(id),
+    team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    autodraft INTEGER DEFAULT 0,
+    queue TEXT DEFAULT '[]',
+    UNIQUE(draft_id, team_id)
+);
 """
 
 

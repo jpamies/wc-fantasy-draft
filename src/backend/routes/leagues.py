@@ -277,6 +277,7 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
             "SELECT id FROM drafts WHERE league_id=?", (league_id,)
         )
         for d in draft_rows:
+            await db.execute("DELETE FROM draft_settings WHERE draft_id=?", (dict(d)["id"],))
             await db.execute("DELETE FROM draft_picks WHERE draft_id=?", (dict(d)["id"],))
         await db.execute("DELETE FROM drafts WHERE league_id=?", (league_id,))
         # Delete transfers
