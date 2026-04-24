@@ -59,6 +59,17 @@ window.clerkReady = (async function initClerk() {
         window.location.reload();
     });
 
+    // Mobile nav toggle
+    document.getElementById('nav-toggle').addEventListener('click', () => {
+        document.getElementById('nav-links').classList.toggle('open');
+    });
+    // Close menu on link click (mobile)
+    document.querySelectorAll('.nav-links a').forEach(a => {
+        a.addEventListener('click', () => {
+            document.getElementById('nav-links').classList.remove('open');
+        });
+    });
+
     // Start router
     Router.init();
 })();
