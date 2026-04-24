@@ -128,6 +128,32 @@ Router.register('#/team', async (container) => {
                 </div>`;
         }
 
+        function renderPitch() {
+            const starters = getStarters();
+            const byPos = {GK:[], DEF:[], MID:[], FWD:[]};
+            starters.forEach(p => byPos[p.position]?.push(p));
+
+            function pitchPlayer(p) {
+                if (!p) return '<div class="pitch-player empty"><img src=""><div class="pitch-name">—</div></div>';
+                return `
+                    <div class="pitch-player">
+                        ${p.player_id === captainId ? '<span class="pitch-badge cap">C</span>' : ''}
+                        ${p.player_id === viceCaptainId ? '<span class="pitch-badge vc">VC</span>' : ''}
+                        <img src="${p.photo || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'">
+                        <div class="pitch-name">${p.name?.split(' ').pop() || ''}</div>
+                    </div>`;
+            }
+
+            // Rows: FWD at top, GK at bottom
+            return `
+                <div class="pitch">
+                    <div class="pitch-row">${byPos.FWD.map(p => pitchPlayer(p)).join('') || '<div class="pitch-player empty"><div class="pitch-name">FWD</div></div>'}</div>
+                    <div class="pitch-row">${byPos.MID.map(p => pitchPlayer(p)).join('') || '<div class="pitch-player empty"><div class="pitch-name">MID</div></div>'}</div>
+                    <div class="pitch-row">${byPos.DEF.map(p => pitchPlayer(p)).join('') || '<div class="pitch-player empty"><div class="pitch-name">DEF</div></div>'}</div>
+                    <div class="pitch-row">${byPos.GK.map(p => pitchPlayer(p)).join('') || '<div class="pitch-player empty"><div class="pitch-name">GK</div></div>'}</div>
+                </div>`;
+        }
+
         function render() {
             const starters = getStarters();
             const bench = getBench().sort((a,b) => POS_ORDER[a.position] - POS_ORDER[b.position]);
@@ -145,6 +171,7 @@ Router.register('#/team', async (container) => {
                             }).join(' ')}
                         </div>
                     </div>
+                    ${starterIds.size > 0 ? renderPitch() : ''}
                 </div>
 
                 ${starterIds.size > 0 && !validateGK() ? '<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ Necesitas al menos 1 portero (GK) titular</div>' : ''}
