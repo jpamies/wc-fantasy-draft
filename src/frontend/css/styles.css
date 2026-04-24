@@ -157,8 +157,8 @@ tr:hover { background: var(--bg-hover); }
 /* Responsive */
 @media (max-width: 768px) {
     .nav-toggle { display: block; }
-    .nav-links { display: none; order: 3; width: 100%; flex-direction: column; gap: 0; background: var(--bg-secondary); }
-    .nav-links.open { display: flex; }
+    .nav-links { display: none !important; order: 3; width: 100%; flex-direction: column; gap: 0; background: var(--bg-secondary); }
+    .nav-links.open { display: flex !important; }
     .nav-links a { padding: .6rem .8rem; border-radius: 0; border-top: 1px solid var(--border); }
     .nav-user { order: 2; margin-left: auto; }
     .hero h1 { font-size: 1.8rem; }
