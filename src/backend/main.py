@@ -21,19 +21,8 @@ async def lifespan(app: FastAPI):
         print(f"Simulator API configured: {settings.SIMULATOR_API_URL}")
         print("Player data will be fetched live from wc-simulator.")
     else:
-        # Only import from local JSON if no simulator configured
-        from src.scripts.import_players import import_data
-        from src.backend.database import get_db
-        db = await get_db()
-        try:
-            rows = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM players")
-            if rows[0]["cnt"] == 0:
-                print("Importing player data from transfermarkt JSONs...")
-                await import_data()
-            else:
-                print(f"Database has {rows[0]['cnt']} players, skipping import.")
-        finally:
-            await db.close()
+        print("⚠️  No SIMULATOR_API_URL configured.")
+        print("   Set SIMULATOR_API_URL to point to wc-simulator for player data.")
 
     yield
 
