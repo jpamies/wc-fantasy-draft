@@ -229,7 +229,36 @@ async def reset_all_scores(auth: dict = Depends(get_current_team)):
         await db.execute("DELETE FROM matchday_lineups")
         await db.execute("DELETE FROM matches")
         await db.execute("DELETE FROM matchdays")
+        await db.execute("DELETE FROM sync_state")
         await db.commit()
         return {"ok": True}
+    finally:
+        await db.close()
+
+
+@router.post("/scoring/sync")
+async def sync_from_simulator():
+    """Pull finished matches from simulator and calculate fantasy points.
+    Called by CronJob every 60 seconds or manually."""
+    from src.backend.services.sync_service import sync_results
+    return await sync_results()
+
+
+@router.get("/scoring/sync-status")
+async def get_sync_status():
+    """Get the current sync state."""
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall("SELECT * FROM sync_state")
+        state = {r["key"]: r["value"] for r in rows}
+        
+        synced = await db.execute_fetchall(
+            "SELECT COUNT(DISTINCT match_id) as matches, COUNT(*) as scores FROM match_scores WHERE match_id IS NOT NULL"
+        )
+        return {
+            "last_sync": state.get("last_sync"),
+            "synced_matches": synced[0]["matches"] if synced else 0,
+            "synced_scores": synced[0]["scores"] if synced else 0,
+        }
     finally:
         await db.close()

@@ -178,6 +178,11 @@ CREATE TABLE IF NOT EXISTS draft_settings (
     queue TEXT DEFAULT '[]',
     UNIQUE(draft_id, team_id)
 );
+
+CREATE TABLE IF NOT EXISTS sync_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
