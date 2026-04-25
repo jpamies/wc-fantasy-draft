@@ -93,13 +93,11 @@ async def fetch_squad_players(country_code: str) -> list[dict]:
 
 
 async def fetch_all_squad_players() -> list[dict]:
-    """Fetch all squad-selected players for all 48 countries (the WC roster)."""
-    countries = await fetch_countries()
-    all_players = []
-    for c in countries:
-        players = await fetch_squad_players(c["code"])
-        all_players.extend(players)
-    return all_players
+    """Fetch all squad-selected players for all 48 countries in one call."""
+    client = get_client()
+    resp = await client.get("/api/v1/squads/all-players", timeout=30.0)
+    resp.raise_for_status()
+    return [_to_fantasy_player(p) for p in resp.json()]
 
 
 async def ensure_player_in_db(player_id: str) -> dict | None:
