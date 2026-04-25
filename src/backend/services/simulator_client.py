@@ -37,6 +37,7 @@ def _to_fantasy_player(p: dict) -> dict:
         "market_value": mv,
         "photo": p.get("photo") or "",
         "clause_value": int(mv * 1.5),
+        "strength": p.get("strength", 50),
     }
 
 

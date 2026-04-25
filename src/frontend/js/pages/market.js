@@ -26,6 +26,7 @@ Router.register('#/market', async (container) => {
                                 <div class="player-meta">${p.country_code} · ${p.club}</div>
                             </div>
                             ${posBadge(p.position)}
+                            <span class="player-ovr">${p.strength || ''}</span>
                             <div class="player-value">${formatMoney(p.market_value)}</div>
                             ${data.window_open ? `<button class="btn btn-sm btn-primary bid-btn" data-pid="${p.id}" data-name="${p.name}" data-value="${p.market_value}">Pujar</button>` : ''}
                         </div>
