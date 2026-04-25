@@ -11,7 +11,9 @@ Router.register('#/draft', async (container) => {
 
     let availablePlayers = [];
     let filterPos = '';
+    let filterCountry = '';
     let searchTerm = '';
+    let countries = [];
     let ws = null;
     let wsConnected = false;
     let pollTimer = null;
@@ -26,6 +28,12 @@ Router.register('#/draft', async (container) => {
         autodraftEnabled = adStatus.team_autodraft || false;
     } catch {}
 
+    // Load countries for filter
+    try {
+        countries = await API.get('/countries');
+        countries.sort((a, b) => a.name.localeCompare(b.name));
+    } catch { countries = []; }
+
     async function loadQueue() {
         try {
             draftQueue = await API.get(`/leagues/${leagueId}/draft/queue`);
@@ -35,6 +43,7 @@ Router.register('#/draft', async (container) => {
     async function loadAvailable() {
         const params = new URLSearchParams();
         if (filterPos) params.set('position', filterPos);
+        if (filterCountry) params.set('country', filterCountry);
         if (searchTerm) params.set('search', searchTerm);
         availablePlayers = await API.get(`/leagues/${leagueId}/draft/available?${params}`);
     }
@@ -88,6 +97,10 @@ Router.register('#/draft', async (container) => {
                             ${['', 'GK', 'DEF', 'MID', 'FWD'].map(p =>
                                 `<button class="filter-btn ${filterPos === p ? 'active' : ''}" data-pos="${p}">${p || 'Todos'}</button>`
                             ).join('')}
+                            <select id="draft-country" class="draft-select">
+                                <option value="">Todos los paises</option>
+                                ${countries.map(c => `<option value="${c.code}" ${filterCountry === c.code ? 'selected' : ''}>${c.name}</option>`).join('')}
+                            </select>
                         </div>
                         <div id="player-list" style="max-height:500px;overflow-y:auto">
                             ${renderPlayerList(availablePlayers, myTurn && !isDone, !isDone)}
@@ -212,6 +225,12 @@ Router.register('#/draft', async (container) => {
                 bindPickButtons();
                 bindQueueAddButtons();
             }
+        });
+
+        document.getElementById('draft-country')?.addEventListener('change', async (e) => {
+            filterCountry = e.target.value;
+            await loadAvailable();
+            render();
         });
 
         document.getElementById('btn-autopick')?.addEventListener('click', async () => {

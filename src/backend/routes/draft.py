@@ -43,8 +43,8 @@ async def get_draft(league_id: str):
 
 
 @router.get("/leagues/{league_id}/draft/available")
-async def get_available(league_id: str, position: str | None = None, search: str | None = None):
-    return await DraftEngine.get_available_players(league_id, position, search)
+async def get_available(league_id: str, position: str | None = None, search: str | None = None, country: str | None = None):
+    return await DraftEngine.get_available_players(league_id, position, search, country)
 
 
 @router.post("/leagues/{league_id}/draft/pick")

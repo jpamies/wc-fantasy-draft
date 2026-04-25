@@ -123,7 +123,9 @@ tr:hover { background: var(--bg-hover); }
 @media (max-width: 900px) { .draft-grid { grid-template-columns: 1fr; } }
 
 /* Filter bar */
-.filter-bar { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.filter-bar { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+.draft-select { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.35rem 0.6rem; font-size: 0.8rem; cursor: pointer; max-width: 180px; }
+.draft-select:focus { border-color: var(--accent); outline: none; }
 .filter-btn { padding: .3rem .7rem; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: 20px; cursor: pointer; font-size: .8rem; }
 .filter-btn.active { border-color: var(--accent-teal); color: var(--accent-teal); background: rgba(20,184,166,.1); }
 

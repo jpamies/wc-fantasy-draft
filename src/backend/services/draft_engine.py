@@ -281,7 +281,7 @@ class DraftEngine:
             await db.close()
 
     @staticmethod
-    async def get_available_players(league_id: str, position: str | None = None, search: str | None = None) -> list:
+    async def get_available_players(league_id: str, position: str | None = None, search: str | None = None, country: str | None = None) -> list:
         db = await get_db()
         try:
             drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
@@ -293,11 +293,24 @@ class DraftEngine:
             picked_ids = set(p["player_id"] for p in picked)
 
             if _use_simulator:
-                from src.backend.services.simulator_client import fetch_players
-                players = await fetch_players(
-                    position=position, search=search, limit=500, offset=0,
-                )
-                return [p for p in players if p["id"] not in picked_ids][:100]
+                from src.backend.services.simulator_client import fetch_all_squad_players
+                all_players = await fetch_all_squad_players()
+                
+                # Filter out already picked
+                available = [p for p in all_players if p["id"] not in picked_ids]
+                
+                # Apply filters
+                if position:
+                    available = [p for p in available if p["position"] == position]
+                if country:
+                    available = [p for p in available if p["country_code"] == country]
+                if search:
+                    term = search.lower()
+                    available = [p for p in available if term in p["name"].lower()]
+                
+                # Sort by market value descending
+                available.sort(key=lambda p: p.get("market_value", 0), reverse=True)
+                return available
 
             where = []
             params: list = []
