@@ -124,8 +124,15 @@ tr:hover { background: var(--bg-hover); }
 
 /* Filter bar */
 .filter-bar { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
-.draft-select { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.35rem 0.6rem; font-size: 0.8rem; cursor: pointer; max-width: 180px; }
-.draft-select:focus { border-color: var(--accent); outline: none; }
+.draft-country-wrap { position: relative; }
+.draft-country-btn { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.35rem 0.7rem; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+.draft-country-btn:hover { border-color: var(--accent); }
+.draft-flag { width: 18px; height: 13px; object-fit: cover; border-radius: 2px; vertical-align: middle; }
+.draft-country-dropdown { display: none; position: absolute; top: 100%; left: 0; z-index: 50; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); max-height: 300px; overflow-y: auto; min-width: 200px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); margin-top: 4px; }
+.draft-country-dropdown.open { display: block; }
+.draft-country-option { padding: 0.4rem 0.7rem; cursor: pointer; display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; transition: background 0.1s; }
+.draft-country-option:hover { background: var(--bg-hover); }
+.draft-country-option.active { background: rgba(245,158,11,0.15); color: var(--accent); font-weight: 600; }
 .filter-btn { padding: .3rem .7rem; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: 20px; cursor: pointer; font-size: .8rem; }
 .filter-btn.active { border-color: var(--accent-teal); color: var(--accent-teal); background: rgba(20,184,166,.1); }
 

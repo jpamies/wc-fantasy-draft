@@ -97,10 +97,19 @@ Router.register('#/draft', async (container) => {
                             ${['', 'GK', 'DEF', 'MID', 'FWD'].map(p =>
                                 `<button class="filter-btn ${filterPos === p ? 'active' : ''}" data-pos="${p}">${p || 'Todos'}</button>`
                             ).join('')}
-                            <select id="draft-country" class="draft-select">
-                                <option value="">Todos los paises</option>
-                                ${countries.map(c => `<option value="${c.code}" ${filterCountry === c.code ? 'selected' : ''}>${c.name}</option>`).join('')}
-                            </select>
+                            <div class="draft-country-wrap" id="draft-country-wrap">
+                                <button class="draft-country-btn" id="draft-country-btn">
+                                    ${filterCountry ? `<img src="${(countries.find(c=>c.code===filterCountry)||{}).flag||''}" class="draft-flag"> ${(countries.find(c=>c.code===filterCountry)||{}).name||''}` : 'Todos los paises'}
+                                </button>
+                                <div class="draft-country-dropdown" id="draft-country-dropdown">
+                                    <div class="draft-country-option ${!filterCountry ? 'active' : ''}" data-code="">Todos los paises</div>
+                                    ${countries.map(c => `
+                                        <div class="draft-country-option ${filterCountry === c.code ? 'active' : ''}" data-code="${c.code}">
+                                            <img src="${c.flag}" class="draft-flag"> ${c.name}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
                         </div>
                         <div id="player-list" style="max-height:500px;overflow-y:auto">
                             ${renderPlayerList(availablePlayers, myTurn && !isDone, !isDone)}
@@ -227,11 +236,21 @@ Router.register('#/draft', async (container) => {
             }
         });
 
-        document.getElementById('draft-country')?.addEventListener('change', async (e) => {
-            filterCountry = e.target.value;
-            await loadAvailable();
-            render();
+        document.getElementById('draft-country-btn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('draft-country-dropdown')?.classList.toggle('open');
         });
+        document.querySelectorAll('.draft-country-option').forEach(opt => {
+            opt.addEventListener('click', async () => {
+                filterCountry = opt.dataset.code;
+                document.getElementById('draft-country-dropdown')?.classList.remove('open');
+                await loadAvailable();
+                render();
+            });
+        });
+        document.addEventListener('click', () => {
+            document.getElementById('draft-country-dropdown')?.classList.remove('open');
+        }, { once: true });
 
         document.getElementById('btn-autopick')?.addEventListener('click', async () => {
             try {
