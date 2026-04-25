@@ -37,9 +37,10 @@ class PlayerOut(BaseModel):
 class CountryOut(BaseModel):
     code: str
     name: str
-    name_local: str = ""
-    flag: str = ""
-    confederation: str = ""
+    name_local: str | None = ""
+    flag: str | None = ""
+    confederation: str | None = ""
+    group_letter: str | None = None
     player_count: int = 0
 
 
