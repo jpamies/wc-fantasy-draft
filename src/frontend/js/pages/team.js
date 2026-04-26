@@ -45,7 +45,8 @@ Router.register('#/team', async (container) => {
             ${matchdays.map((md, i) => {
                 const icon = md.status === 'completed' ? '✅' : md.status === 'active' ? '🔴' : '📋';
                 const badgeClass = md.status === 'completed' ? 'badge-teal' : md.status === 'active' ? 'badge-gold' : '';
-                const shortName = md.name.replace(/Jornada /i, 'J').replace(/ — .*/, '');
+                const TAB_LABELS = {GS1:'J1',GS2:'J2',GS3:'J3',R32:'1/32',R16:'1/16',QF:'1/4',SF:'1/2',FINAL:'Final'};
+                const shortName = TAB_LABELS[md.id] || md.id;
                 return `
                 <button class="btn ${i === defaultMdIndex ? 'btn-gold' : 'btn-outline'} md-tab" data-mdid="${md.id}" style="font-size:.8rem;white-space:nowrap;padding:.4rem .7rem">
                     ${shortName}
