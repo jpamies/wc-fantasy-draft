@@ -305,3 +305,40 @@ async def get_leaderboard(auth: dict = Depends(get_current_team)):
         return results
     finally:
         await db.close()
+
+
+# ─── Matchday Lineup Management ───
+
+@router.get("/lineup/{matchday_id}")
+async def get_matchday_lineup(matchday_id: str, auth: dict = Depends(get_current_team)):
+    """Get current matchday lineup with played/available status for each player."""
+    from src.backend.services.lineup_service import get_lineup_status
+    return await get_lineup_status(auth["team_id"], matchday_id)
+
+
+@router.post("/lineup/{matchday_id}/swap")
+async def swap_lineup_player(matchday_id: str, body: dict, auth: dict = Depends(get_current_team)):
+    """Swap a starter with a bench player during a live matchday.
+    
+    Body: {"starter_out": "player_id", "bench_in": "player_id"}
+    
+    Rules:
+    - Matchday must have started (at least 1 match finished)
+    - bench_in player's country must NOT have played yet
+    - starter_out can be any starter (played or not)
+    - Removing a starter who scored = lose their points
+    """
+    from src.backend.services.lineup_service import swap_player
+    
+    starter_out = body.get("starter_out")
+    bench_in = body.get("bench_in")
+    
+    if not starter_out or not bench_in:
+        raise HTTPException(400, "Provide starter_out and bench_in player IDs")
+    
+    result = await swap_player(auth["team_id"], matchday_id, bench_in, starter_out)
+    
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    
+    return result

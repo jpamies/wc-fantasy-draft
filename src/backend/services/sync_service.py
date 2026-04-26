@@ -145,6 +145,10 @@ async def sync_results() -> dict:
         if not new_matches and removed == 0:
             return {"synced": 0, "already_synced": len(synced_ids), "message": "All up to date"}
         
+        # Ensure lineup snapshots exist for all teams in affected matchdays
+        new_matchday_ids = list({e["match"]["matchday_id"] for e in new_matches})
+        await _ensure_all_snapshots(new_matchday_ids)
+        
         # Ensure matchdays and matches exist in fantasy DB
         total_scores = 0
         for entry in new_matches:
@@ -261,3 +265,19 @@ async def _update_team_points(matchday_ids: list[str]) -> int:
         return count
     finally:
         await db.close()
+
+
+async def _ensure_all_snapshots(matchday_ids: list[str]):
+    """Create lineup snapshots for all fantasy teams for the given matchdays.
+    Only creates if no snapshot exists yet (first match of matchday finished)."""
+    from src.backend.services.lineup_service import ensure_matchday_snapshot
+    
+    db = await get_db()
+    try:
+        teams = await db.execute_fetchall("SELECT id FROM fantasy_teams")
+    finally:
+        await db.close()
+    
+    for team in teams:
+        for md_id in matchday_ids:
+            await ensure_matchday_snapshot(team["id"], md_id)
