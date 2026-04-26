@@ -122,13 +122,27 @@ async def sync_results() -> dict:
             resp.raise_for_status()
             finished = resp.json()
         
+        finished_ids = {m["match"]["id"] for m in finished} if finished else set()
+        
+        # Detect reset: if we have synced matches that no longer exist in simulator
+        stale_ids = synced_ids - finished_ids
+        removed = 0
+        if stale_ids:
+            for stale_id in stale_ids:
+                await db.execute("DELETE FROM match_scores WHERE match_id = ?", (stale_id,))
+                await db.execute("DELETE FROM matches WHERE id = ?", (stale_id,))
+            await db.commit()
+            removed = len(stale_ids)
+            logger.info(f"Removed {removed} stale matches (simulator reset detected)")
+            synced_ids -= stale_ids
+        
         if not finished:
-            return {"synced": 0, "message": "No finished matches"}
+            return {"synced": 0, "removed": removed, "message": "No finished matches in simulator"}
         
         # Filter to only new matches
         new_matches = [m for m in finished if m["match"]["id"] not in synced_ids]
         
-        if not new_matches:
+        if not new_matches and removed == 0:
             return {"synced": 0, "already_synced": len(synced_ids), "message": "All up to date"}
         
         # Ensure matchdays and matches exist in fantasy DB
@@ -201,10 +215,11 @@ async def sync_results() -> dict:
         )
         await db.commit()
         
-        logger.info(f"Synced {len(new_matches)} matches, {total_scores} player scores")
+        logger.info(f"Synced {len(new_matches)} matches, {total_scores} player scores, removed {removed}")
         return {
             "synced_matches": len(new_matches),
             "synced_scores": total_scores,
+            "removed_matches": removed,
             "already_synced": len(synced_ids),
             "total_finished": len(finished),
         }
