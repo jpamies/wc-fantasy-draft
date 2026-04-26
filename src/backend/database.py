@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS leagues (
     initial_budget INTEGER DEFAULT 500000000,
     draft_timer_seconds INTEGER DEFAULT 60,
     max_clausulazos_per_window INTEGER DEFAULT 2,
-    auto_substitutions INTEGER DEFAULT 1,
+    auto_substitutions INTEGER DEFAULT 0,
     draft_order TEXT DEFAULT 'snake',
     captain_multiplier REAL DEFAULT 2.0,
     transfer_window_open INTEGER DEFAULT 0,

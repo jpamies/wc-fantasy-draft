@@ -126,9 +126,18 @@ class ScoringEngine:
 
     @staticmethod
     async def get_team_matchday_points(team_id: str, matchday_id: str) -> int:
-        """Calculate a team's points for a matchday with auto-substitution."""
+        """Calculate a team's points for a matchday, respecting league auto_substitutions setting."""
         db = await get_db()
         try:
+            # Get league auto_substitutions setting
+            league_row = await db.execute_fetchall(
+                """SELECT l.auto_substitutions FROM fantasy_teams ft
+                   JOIN leagues l ON ft.league_id = l.id
+                   WHERE ft.id=?""",
+                (team_id,),
+            )
+            auto_subs_enabled = league_row[0]["auto_substitutions"] if league_row else 0
+
             # Try matchday-specific lineup first, fall back to default
             roster = await db.execute_fetchall(
                 """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain,
@@ -160,9 +169,9 @@ class ScoringEngine:
             )
             score_map = {dict(s)["player_id"]: dict(s) for s in scores}
 
-            # Auto-substitution: replace starters with 0 min from bench
+            # Auto-substitution (only if enabled in league settings)
             subs_used = 0
-            max_subs = 3
+            max_subs = 3 if auto_subs_enabled else 0
             active = []
             for s in starters:
                 sc = score_map.get(s["player_id"])
