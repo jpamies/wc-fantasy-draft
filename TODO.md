@@ -1,6 +1,37 @@
 # TODO — Fantasy ↔ Simulator Integration
 
-## Arquitectura: Polling via API HTTP (desacoplado)
+## NEXT: Cambios durante jornada (mid-matchday swaps)
+
+### Reglas
+1. **Jornada empieza** cuando el primer partido de esa jornada se ha jugado (status=finished en simulador)
+2. Al empezar la jornada, se congela un **snapshot** de `matchday_lineups` (titulares + suplentes)
+3. Las altas/bajas del mercado NO afectan a la jornada en curso
+4. **"Ha jugado"** = su selección nacional ha disputado un partido en esa jornada (independiente de minutos)
+
+### Swaps permitidos durante jornada
+| Acción | País del jugador YA jugó | País NO ha jugado |
+|---|---|---|
+| Quitar de titular → banquillo | ✅ (pierde sus puntos) | ✅ |
+| Poner de banquillo → titular | ❌ No permitido | ✅ |
+
+### Implementación necesaria
+- [ ] Endpoint `POST /lineup/{matchday_id}/swap` con validaciones:
+  - Verificar que la jornada ha empezado
+  - Verificar que el jugador a poner como titular: su país NO ha jugado
+  - No importa si el que sale ya jugó o no
+- [ ] El sync recalcula puntos basándose en el estado ACTUAL de titulares
+  - Si quitas un titular que tenía puntos → se pierden
+  - Si pones un titular cuyo país aún no jugó → cuando juegue, sumará
+- [ ] Endpoint `GET /lineup/{matchday_id}/available-swaps` para el frontend:
+  - Lista de suplentes disponibles (cuyo país no ha jugado)
+  - Lista de titulares que se pueden quitar (todos)
+- [ ] Necesita saber qué países han jugado: del simulador `GET /matches?status=finished&matchday_id=X`
+
+### Idempotencia del sync
+- [x] match_scores usa INSERT OR REPLACE (idempotente por player_id+matchday_id)
+- [x] Si se ejecuta 2 veces, no duplica datos
+- [x] Detecta reset del simulador y limpia datos stale
+- [ ] Puntos de equipo se recalculan en cada sync basándose en titulares actuales
 
 Fantasy hace polling periódico al simulador para detectar cambios.
 No DB compartida, no webhooks. Simplicidad y desacoplamiento.
