@@ -149,9 +149,9 @@ async def get_standings(league_id: str):
         teams = await db.execute_fetchall(
             "SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,)
         )
-        # Get all completed matchdays
+        # Get all matchdays with results (active or completed)
         matchdays = await db.execute_fetchall(
-            "SELECT id FROM matchdays WHERE status='completed'"
+            "SELECT id FROM matchdays WHERE status IN ('active', 'completed')"
         )
 
         standings = []
