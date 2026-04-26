@@ -39,6 +39,12 @@ Router.register('#/scoring', async (container) => {
 async function loadMatchday(container, mdId) {
     const md = await API.get(`/scoring/matchdays/${mdId}`);
 
+    function flagImg(flag) {
+        if (!flag) return '';
+        if (flag.startsWith('http')) return `<img src="${flag}" alt="" style="height:16px;vertical-align:middle">`;
+        return flag;
+    }
+
     // Group scores by match_id and country
     const scoresByMatch = {};
     md.scores.forEach(s => {
@@ -92,22 +98,22 @@ async function loadMatchday(container, mdId) {
                 return `
                 <div class="match-accordion" style="border-bottom:1px solid var(--border)">
                     <div class="match-header" data-mid="${m.id}" style="padding:.75rem;display:flex;align-items:center;gap:1rem;cursor:${hasScores ? 'pointer' : 'default'}">
-                        <span>${m.home_flag || ''} <strong>${m.home_name}</strong></span>
+                        <span>${flagImg(m.home_flag)} <strong>${m.home_name}</strong></span>
                         <span style="font-size:1.3rem;font-weight:700;color:var(--accent-gold);min-width:50px;text-align:center">
                             ${m.score_home != null ? `${m.score_home} - ${m.score_away}` : 'vs'}
                         </span>
-                        <span><strong>${m.away_name}</strong> ${m.away_flag || ''}</span>
+                        <span><strong>${m.away_name}</strong> ${flagImg(m.away_flag)}</span>
                         <span class="badge ${m.status === 'finished' ? 'badge-teal' : ''}" style="margin-left:auto;font-size:.75rem">${m.status}</span>
                         ${hasScores ? '<span style="color:var(--text-muted);font-size:.8rem">▼</span>' : ''}
                     </div>
                     <div class="match-detail" id="detail-${m.id}" style="display:none;padding:0 .75rem .75rem">
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                             <div>
-                                <div style="font-weight:600;margin-bottom:.5rem">${m.home_flag || ''} ${m.home_name}</div>
+                                <div style="font-weight:600;margin-bottom:.5rem">${flagImg(m.home_flag)} ${m.home_name}</div>
                                 ${renderMatchPlayers(m.id, m.home_country)}
                             </div>
                             <div>
-                                <div style="font-weight:600;margin-bottom:.5rem">${m.away_name} ${m.away_flag || ''}</div>
+                                <div style="font-weight:600;margin-bottom:.5rem">${flagImg(m.away_flag)} ${m.away_name}</div>
                                 ${renderMatchPlayers(m.id, m.away_country)}
                             </div>
                         </div>

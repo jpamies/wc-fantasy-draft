@@ -6,6 +6,18 @@ from src.backend.models import TeamOut, TeamPlayerOut, LineupUpdate
 
 router = APIRouter(prefix="/api/v1", tags=["teams"])
 
+
+async def _ensure_matchday_exists(db, matchday_id: str):
+    """Ensure a matchday row exists in the local DB (for FK integrity).
+    The calendar lives in the simulator — this just creates a stub if missing."""
+    existing = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=?", (matchday_id,))
+    if not existing:
+        await db.execute(
+            "INSERT OR IGNORE INTO matchdays (id, name, date, phase, status) VALUES (?,?,?,?,?)",
+            (matchday_id, matchday_id, "", "groups", "upcoming"),
+        )
+        await db.commit()
+
 FORMATIONS = {
     "4-3-3": {"DEF": 4, "MID": 3, "FWD": 3},
     "4-4-2": {"DEF": 4, "MID": 4, "FWD": 2},
@@ -144,6 +156,8 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
             (team_id, matchday_id),
         )
         if existing[0]["cnt"] == 0:
+            # Ensure matchday row exists for FK integrity
+            await _ensure_matchday_exists(db, matchday_id)
             # Copy from default team_players
             defaults = await db.execute_fetchall(
                 "SELECT player_id, is_starter, is_captain, is_vice_captain FROM team_players WHERE team_id=?",
@@ -235,6 +249,8 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
             (team_id, matchday_id),
         )
         if existing[0]["cnt"] == 0:
+            # Ensure matchday row exists for FK integrity
+            await _ensure_matchday_exists(db, matchday_id)
             # Copy defaults first
             defaults = await db.execute_fetchall(
                 "SELECT player_id, is_starter, is_captain, is_vice_captain FROM team_players WHERE team_id=?",

@@ -56,6 +56,14 @@ async def ensure_matchday_snapshot(team_id: str, matchday_id: str):
         if existing[0]["c"] > 0:
             return  # Already snapshotted
         
+        # Ensure matchday row exists for FK integrity
+        md_exists = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=?", (matchday_id,))
+        if not md_exists:
+            await db.execute(
+                "INSERT OR IGNORE INTO matchdays (id, name, date, phase, status) VALUES (?,?,?,?,?)",
+                (matchday_id, matchday_id, "", "groups", "upcoming"),
+            )
+        
         # Create snapshot from current team_players
         players = await db.execute_fetchall(
             """SELECT player_id, is_starter, is_captain, is_vice_captain
