@@ -262,3 +262,46 @@ async def get_sync_status():
         }
     finally:
         await db.close()
+
+
+@router.get("/scoring/leaderboard")
+async def get_leaderboard(auth: dict = Depends(get_current_team)):
+    """Get fantasy league leaderboard — total points per team across all matchdays."""
+    from src.backend.services.scoring_engine import ScoringEngine
+    league_id = auth["league_id"]
+    db = await get_db()
+    try:
+        teams = await db.execute_fetchall(
+            "SELECT id, team_name, owner_nick, display_name FROM fantasy_teams WHERE league_id=?",
+            (league_id,),
+        )
+        
+        # Get all completed matchdays
+        matchdays = await db.execute_fetchall(
+            "SELECT DISTINCT matchday_id FROM match_scores WHERE match_id IS NOT NULL"
+        )
+        md_ids = [m["matchday_id"] for m in matchdays]
+        
+        results = []
+        for t in teams:
+            t = dict(t)
+            total_pts = 0
+            md_points = {}
+            for md_id in md_ids:
+                pts = await ScoringEngine.get_team_matchday_points(t["id"], md_id)
+                total_pts += pts
+                md_points[md_id] = pts
+            
+            results.append({
+                "team_id": t["id"],
+                "team_name": t["team_name"],
+                "display_name": t.get("display_name") or t["owner_nick"],
+                "total_points": total_pts,
+                "matchday_points": md_points,
+                "matchdays_played": len([p for p in md_points.values() if p > 0]),
+            })
+        
+        results.sort(key=lambda x: x["total_points"], reverse=True)
+        return results
+    finally:
+        await db.close()

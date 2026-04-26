@@ -208,6 +208,10 @@ async def sync_results() -> dict:
         
         await db.commit()
         
+        # Calculate team fantasy points for synced matchdays
+        synced_matchday_ids = list({e["match"]["matchday_id"] for e in new_matches})
+        teams_scored = await _update_team_points(synced_matchday_ids)
+        
         # Update sync state
         await db.execute(
             "INSERT OR REPLACE INTO sync_state (key, value) VALUES ('last_sync', ?)",
@@ -215,10 +219,11 @@ async def sync_results() -> dict:
         )
         await db.commit()
         
-        logger.info(f"Synced {len(new_matches)} matches, {total_scores} player scores, removed {removed}")
+        logger.info(f"Synced {len(new_matches)} matches, {total_scores} scores, {teams_scored} team scores, removed {removed}")
         return {
             "synced_matches": len(new_matches),
             "synced_scores": total_scores,
+            "teams_scored": teams_scored,
             "removed_matches": removed,
             "already_synced": len(synced_ids),
             "total_finished": len(finished),
@@ -226,5 +231,33 @@ async def sync_results() -> dict:
     except Exception as e:
         logger.error(f"Sync error: {e}")
         return {"error": str(e)}
+    finally:
+        await db.close()
+
+
+async def _update_team_points(matchday_ids: list[str]) -> int:
+    """Recalculate fantasy team points for given matchdays.
+    Uses existing ScoringEngine which handles lineups, auto-subs, captain bonus."""
+    from src.backend.services.scoring_engine import ScoringEngine
+    
+    db = await get_db()
+    try:
+        # Get all fantasy teams across all leagues
+        teams = await db.execute_fetchall("SELECT id, league_id FROM fantasy_teams")
+        
+        count = 0
+        for team in teams:
+            for md_id in matchday_ids:
+                pts = await ScoringEngine.get_team_matchday_points(team["id"], md_id)
+                # Store calculated points (for leaderboard queries)
+                await db.execute(
+                    """INSERT OR REPLACE INTO sync_state (key, value)
+                       VALUES (?, ?)""",
+                    (f"team_pts:{team['id']}:{md_id}", str(pts)),
+                )
+                count += 1
+        
+        await db.commit()
+        return count
     finally:
         await db.close()
