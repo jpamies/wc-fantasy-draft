@@ -86,7 +86,7 @@ async def fetch_countries() -> list[dict]:
 async def fetch_calendar() -> list[dict]:
     """Fetch full calendar (matchdays + matches) from wc-simulator."""
     client = get_client()
-    resp = await client.get("/api/v1/calendar", timeout=15.0)
+    resp = await client.get("/api/v1/tournament/calendar", timeout=15.0)
     resp.raise_for_status()
     return resp.json()
 
