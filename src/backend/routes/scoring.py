@@ -1,123 +1,107 @@
-import uuid
-import json
-import os
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from src.backend.auth import get_current_team
 from src.backend.database import get_db
 from src.backend.services.scoring_engine import ScoringEngine
-from src.backend.models import MatchdayCreate, MatchCreate, MatchResultUpdate, ScoreBatchEntry
 
+logger = logging.getLogger("wc-fantasy.scoring")
 router = APIRouter(prefix="/api/v1", tags=["scoring"])
+
+
+async def _fetch_sim_calendar() -> list[dict]:
+    """Fetch calendar from simulator, return empty list on failure."""
+    try:
+        from src.backend.services.simulator_client import fetch_calendar
+        return await fetch_calendar()
+    except Exception as e:
+        logger.error(f"Failed to fetch calendar from simulator: {e}")
+        return []
 
 
 @router.get("/scoring/matchdays")
 async def list_matchdays():
+    """List matchdays from simulator, enriched with local status (active/completed)."""
+    calendar = await _fetch_sim_calendar()
+    if not calendar:
+        return []
+
+    # Get local matchday statuses (active/completed from sync)
     db = await get_db()
     try:
-        rows = await db.execute_fetchall("SELECT * FROM matchdays ORDER BY date")
-        return [dict(r) for r in rows]
+        local_mds = await db.execute_fetchall("SELECT id, status FROM matchdays")
+        status_map = {r["id"]: r["status"] for r in local_mds}
     finally:
         await db.close()
 
-
-@router.post("/scoring/matchdays")
-async def create_matchday(body: MatchdayCreate, auth: dict = Depends(get_current_team)):
-    if not auth.get("is_commissioner"):
-        raise HTTPException(403, "Commissioner only")
-    db = await get_db()
-    try:
-        await db.execute(
-            "INSERT INTO matchdays (id, name, date, phase, status) VALUES (?,?,?,?,?)",
-            (body.id, body.name, body.date, body.phase, "upcoming"),
-        )
-        await db.commit()
-        return {"ok": True, "id": body.id}
-    finally:
-        await db.close()
+    result = []
+    for md in calendar:
+        md_status = status_map.get(md["id"], md.get("status", "upcoming"))
+        # If simulator says all matches finished, override to completed
+        matches = md.get("matches", [])
+        all_finished = matches and all(m.get("status") == "finished" for m in matches)
+        if all_finished and md_status != "completed":
+            md_status = "active"
+        result.append({
+            "id": md["id"],
+            "name": md.get("name", md["id"]),
+            "date": md.get("date", ""),
+            "phase": md.get("phase", "groups"),
+            "status": md_status,
+        })
+    return result
 
 
 @router.get("/scoring/matchdays/{matchday_id}")
 async def get_matchday(matchday_id: str):
+    """Get matchday detail: matches from simulator, scores from local DB."""
+    calendar = await _fetch_sim_calendar()
+    md_data = next((md for md in calendar if md["id"] == matchday_id), None)
+    if not md_data:
+        raise HTTPException(404, "Matchday not found in simulator")
+
+    # Map simulator matches to frontend format
+    sim_matches = md_data.get("matches", [])
+    matches = []
+    for m in sim_matches:
+        matches.append({
+            "id": m["id"],
+            "matchday_id": matchday_id,
+            "home_country": m.get("home_code", ""),
+            "away_country": m.get("away_code", ""),
+            "home_name": m.get("home_team", m.get("home_code", "")),
+            "away_name": m.get("away_team", m.get("away_code", "")),
+            "home_flag": m.get("home_flag", ""),
+            "away_flag": m.get("away_flag", ""),
+            "kickoff": m.get("kickoff", ""),
+            "score_home": m.get("score_home"),
+            "score_away": m.get("score_away"),
+            "status": m.get("status", "scheduled"),
+        })
+
+    # Get local scores
     db = await get_db()
     try:
-        md = await db.execute_fetchall("SELECT * FROM matchdays WHERE id=?", (matchday_id,))
-        if not md:
-            raise HTTPException(404, "Matchday not found")
-        matches = await db.execute_fetchall(
-            """SELECT m.*, ch.name as home_name, ch.flag as home_flag,
-                      ca.name as away_name, ca.flag as away_flag
-               FROM matches m
-               JOIN countries ch ON m.home_country=ch.code
-               JOIN countries ca ON m.away_country=ca.code
-               WHERE m.matchday_id=?""",
-            (matchday_id,),
-        )
         scores = await db.execute_fetchall(
             """SELECT ms.*, p.name as player_name, p.position, p.country_code
                FROM match_scores ms JOIN players p ON ms.player_id=p.id
                WHERE ms.matchday_id=? ORDER BY ms.total_points DESC""",
             (matchday_id,),
         )
-        return {
-            **dict(md[0]),
-            "matches": [dict(m) for m in matches],
-            "scores": [dict(s) for s in scores],
-        }
+        local_md = await db.execute_fetchall("SELECT status FROM matchdays WHERE id=?", (matchday_id,))
     finally:
         await db.close()
 
+    md_status = local_md[0]["status"] if local_md else md_data.get("status", "upcoming")
 
-@router.post("/scoring/matchdays/{matchday_id}/matches")
-async def add_match(matchday_id: str, body: MatchCreate, auth: dict = Depends(get_current_team)):
-    if not auth.get("is_commissioner"):
-        raise HTTPException(403, "Commissioner only")
-    db = await get_db()
-    try:
-        await db.execute(
-            "INSERT INTO matches (id, matchday_id, home_country, away_country, kickoff, status) VALUES (?,?,?,?,?,?)",
-            (body.id, matchday_id, body.home_country, body.away_country, body.kickoff, "scheduled"),
-        )
-        await db.commit()
-        return {"ok": True}
-    finally:
-        await db.close()
-
-
-@router.patch("/scoring/matches/{match_id}/result")
-async def update_result(match_id: str, body: MatchResultUpdate, auth: dict = Depends(get_current_team)):
-    if not auth.get("is_commissioner"):
-        raise HTTPException(403, "Commissioner only")
-    db = await get_db()
-    try:
-        await db.execute(
-            "UPDATE matches SET score_home=?, score_away=?, status='finished' WHERE id=?",
-            (body.score_home, body.score_away, match_id),
-        )
-        await db.commit()
-        return {"ok": True}
-    finally:
-        await db.close()
-
-
-@router.post("/scoring/matchdays/{matchday_id}/scores")
-async def submit_scores(matchday_id: str, body: ScoreBatchEntry, auth: dict = Depends(get_current_team)):
-    if not auth.get("is_commissioner"):
-        raise HTTPException(403, "Commissioner only")
-    scores = [s.model_dump() for s in body.scores]
-    results = await ScoringEngine.process_match_scores(matchday_id, body.match_id, scores)
-    # Mark matchday as completed if all matches finished
-    db = await get_db()
-    try:
-        unfinished = await db.execute_fetchall(
-            "SELECT COUNT(*) as cnt FROM matches WHERE matchday_id=? AND status!='finished'",
-            (matchday_id,),
-        )
-        if unfinished[0]["cnt"] == 0:
-            await db.execute("UPDATE matchdays SET status='completed' WHERE id=?", (matchday_id,))
-            await db.commit()
-    finally:
-        await db.close()
-    return {"ok": True, "scores": results}
+    return {
+        "id": matchday_id,
+        "name": md_data.get("name", matchday_id),
+        "date": md_data.get("date", ""),
+        "phase": md_data.get("phase", "groups"),
+        "status": md_status,
+        "matches": matches,
+        "scores": [dict(s) for s in scores],
+    }
 
 
 @router.get("/scoring/matchdays/{matchday_id}/fantasy-points")
@@ -143,95 +127,6 @@ async def get_fantasy_points(matchday_id: str, auth: dict = Depends(get_current_
             })
         results.sort(key=lambda x: x["points"], reverse=True)
         return results
-    finally:
-        await db.close()
-
-
-@router.post("/scoring/populate-calendar")
-async def populate_calendar(auth: dict = Depends(get_current_team)):
-    """Pre-populate matchdays and matches from data/tournament/calendar.json. Commissioner only."""
-    if not auth.get("is_commissioner"):
-        raise HTTPException(403, "Commissioner only")
-    
-    calendar_path = os.path.join("data", "tournament", "calendar.json")
-    if not os.path.exists(calendar_path):
-        raise HTTPException(404, "Calendar file not found")
-    
-    with open(calendar_path, "r", encoding="utf-8") as f:
-        calendar = json.load(f)
-    
-    db = await get_db()
-    try:
-        created_matchdays = 0
-        created_matches = 0
-        for md in calendar:
-            # Skip if matchday already exists
-            existing = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=?", (md["id"],))
-            if existing:
-                continue
-            await db.execute(
-                "INSERT INTO matchdays (id, name, date, phase, status) VALUES (?,?,?,?,?)",
-                (md["id"], md["name"], md.get("date", ""), md.get("phase", "groups"), "upcoming"),
-            )
-            created_matchdays += 1
-            for m in md.get("matches", []):
-                await db.execute(
-                    "INSERT INTO matches (id, matchday_id, home_country, away_country, kickoff, status) VALUES (?,?,?,?,?,?)",
-                    (m["id"], md["id"], m["home"], m["away"], m.get("kickoff", ""), "scheduled"),
-                )
-                created_matches += 1
-        await db.commit()
-        return {"ok": True, "matchdays_created": created_matchdays, "matches_created": created_matches}
-    finally:
-        await db.close()
-
-
-@router.post("/scoring/matchdays/{matchday_id}/simulate")
-async def simulate_matchday(matchday_id: str, auth: dict = Depends(get_current_team)):
-    """Simulate realistic scores for testing. Commissioner only."""
-    if not auth.get("is_commissioner"):
-        raise HTTPException(403, "Commissioner only")
-    from src.scripts.fetch_scores import simulate_match_scores
-    await simulate_match_scores(matchday_id)
-    return {"ok": True}
-
-
-@router.post("/scoring/matchdays/{matchday_id}/reset")
-async def reset_matchday_scores(matchday_id: str, auth: dict = Depends(get_current_team)):
-    """Reset all scores and results for a matchday. Commissioner only."""
-    if not auth.get("is_commissioner"):
-        raise HTTPException(403, "Commissioner only")
-    db = await get_db()
-    try:
-        # Delete all match scores for this matchday
-        await db.execute("DELETE FROM match_scores WHERE matchday_id=?", (matchday_id,))
-        # Reset match results
-        await db.execute(
-            "UPDATE matches SET score_home=NULL, score_away=NULL, status='scheduled' WHERE matchday_id=?",
-            (matchday_id,),
-        )
-        # Reset matchday status
-        await db.execute("UPDATE matchdays SET status='upcoming' WHERE id=?", (matchday_id,))
-        await db.commit()
-        return {"ok": True}
-    finally:
-        await db.close()
-
-
-@router.delete("/scoring/reset-all")
-async def reset_all_scores(auth: dict = Depends(get_current_team)):
-    """Reset ALL matchdays, matches, and scores. Commissioner only."""
-    if not auth.get("is_commissioner"):
-        raise HTTPException(403, "Commissioner only")
-    db = await get_db()
-    try:
-        await db.execute("DELETE FROM match_scores")
-        await db.execute("DELETE FROM matchday_lineups")
-        await db.execute("DELETE FROM matches")
-        await db.execute("DELETE FROM matchdays")
-        await db.execute("DELETE FROM sync_state")
-        await db.commit()
-        return {"ok": True}
     finally:
         await db.close()
 

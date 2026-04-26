@@ -1,34 +1,31 @@
-/* Scoring page — matchday management and score entry */
+/* Scoring page — calendar from simulator, scores from sync */
 Router.register('#/scoring', async (container) => {
     const matchdays = await API.get('/scoring/matchdays');
-    const isComm = API.isCommissioner();
 
     container.innerHTML = `
         <div class="flex-between mb-2">
-            <h2>⚽ Puntuación</h2>
-            <div class="flex" style="gap:.5rem">
-                ${isComm && matchdays.length === 0 ? '<button class="btn btn-primary" id="btn-populate-calendar">📅 Cargar Calendario WC2026</button>' : ''}
-                ${isComm && matchdays.length > 0 ? '<button class="btn btn-sm" id="btn-reset-all" style="background:var(--accent-red,#e74c3c);color:#fff;font-size:.75rem">🗑️ Reset todo</button>' : ''}
-                ${isComm ? '<button class="btn btn-gold" id="btn-new-matchday">+ Crear Jornada</button>' : ''}
-            </div>
+            <h2>⚽ Calendario y Puntuación</h2>
         </div>
 
         ${matchdays.length === 0 ? `
             <div class="card text-center">
-                <p style="color:var(--text-muted)">No hay jornadas creadas todavía.</p>
-                ${isComm ? '<p style="font-size:.85rem;color:var(--text-secondary);margin-top:.5rem">Crea una jornada para empezar a registrar puntuaciones.</p>' : ''}
+                <p style="color:var(--text-muted)">No hay jornadas disponibles.</p>
+                <p style="font-size:.85rem;color:var(--text-secondary);margin-top:.5rem">El calendario se carga automáticamente del simulador.</p>
             </div>
         ` : `
             <div class="grid grid-2">
-                ${matchdays.map(md => `
+                ${matchdays.map(md => {
+                    const statusIcon = md.status === 'active' ? '🔴' : md.status === 'completed' ? '✅' : '📋';
+                    const badgeClass = md.status === 'completed' ? 'badge-teal' : md.status === 'active' ? 'badge-gold' : '';
+                    return `
                     <div class="card" style="cursor:pointer" data-mdid="${md.id}">
                         <div class="flex-between">
                             <div class="card-header" style="margin:0">${md.name}</div>
-                            <span class="badge ${md.status === 'completed' ? 'badge-teal' : 'badge-gold'}">${md.status}</span>
+                            <span class="badge ${badgeClass}">${statusIcon} ${md.status}</span>
                         </div>
                         <div style="font-size:.85rem;color:var(--text-secondary)">${md.date || ''} · ${md.phase}</div>
-                    </div>
-                `).join('')}
+                    </div>`;
+                }).join('')}
             </div>
         `}
     `;
@@ -37,63 +34,10 @@ Router.register('#/scoring', async (container) => {
     container.querySelectorAll('[data-mdid]').forEach(card => {
         card.addEventListener('click', () => loadMatchday(container, card.dataset.mdid));
     });
-
-    // Populate calendar
-    document.getElementById('btn-populate-calendar')?.addEventListener('click', async () => {
-        try {
-            const res = await API.post('/scoring/populate-calendar');
-            showToast(`Calendario cargado: ${res.matchdays_created} jornadas, ${res.matches_created} partidos`, 'success');
-            Router.handleRoute();
-        } catch (err) { showToast(err.message, 'error'); }
-    });
-
-    document.getElementById('btn-reset-all')?.addEventListener('click', async () => {
-        if (!confirm('⚠️ ¿Borrar TODAS las jornadas, partidos y puntuaciones? Esta acción no se puede deshacer.')) return;
-        try {
-            await API.delete('/scoring/reset-all');
-            showToast('Todo reseteado', 'success');
-            Router.handleRoute();
-        } catch (err) { showToast(err.message, 'error'); }
-    });
-
-    document.getElementById('btn-new-matchday')?.addEventListener('click', () => {
-        showModal(`
-            <div class="modal-title">Crear Jornada</div>
-            <div class="form-group">
-                <label>ID (ej: MD1)</label>
-                <input type="text" id="md-id" required placeholder="MD1">
-            </div>
-            <div class="form-group">
-                <label>Nombre</label>
-                <input type="text" id="md-name" required placeholder="Jornada 1 — Fase de Grupos">
-            </div>
-            <div class="form-group">
-                <label>Fecha</label>
-                <input type="date" id="md-date">
-            </div>
-            <div class="flex">
-                <button class="btn btn-gold" id="btn-create-md">Crear</button>
-                <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
-            </div>
-        `);
-        document.getElementById('btn-create-md').addEventListener('click', async () => {
-            try {
-                await API.post('/scoring/matchdays', {
-                    id: document.getElementById('md-id').value,
-                    name: document.getElementById('md-name').value,
-                    date: document.getElementById('md-date').value || null,
-                });
-                showToast('Jornada creada', 'success');
-                closeModal();
-                Router.handleRoute();
-            } catch (err) { showToast(err.message, 'error'); }
-        });
-    });
 });
 
 async function loadMatchday(container, mdId) {
     const md = await API.get(`/scoring/matchdays/${mdId}`);
-    const isComm = API.isCommissioner();
 
     // Group scores by match_id and country
     const scoresByMatch = {};
@@ -106,7 +50,6 @@ async function loadMatchday(container, mdId) {
     function renderMatchPlayers(matchId, countryCode) {
         const posOrder = {GK:0, DEF:1, MID:2, FWD:3};
         const players = (scoresByMatch[matchId]?.[countryCode] || []);
-        // Top 11 by minutes = starters, rest = subs
         const sorted = [...players].sort((a, b) => b.minutes_played - a.minutes_played);
         const starting = sorted.slice(0, 11).sort((a, b) => (posOrder[a.position]||9) - (posOrder[b.position]||9));
         const subs = sorted.slice(11).sort((a, b) => (posOrder[a.position]||9) - (posOrder[b.position]||9));
@@ -130,18 +73,15 @@ async function loadMatchday(container, mdId) {
         `;
     }
 
+    const statusIcon = md.status === 'active' ? '🔴' : md.status === 'completed' ? '✅' : '📋';
+
     container.innerHTML = `
         <div class="flex-between mb-2">
             <div>
                 <a href="#/scoring" style="font-size:.85rem">← Volver</a>
                 <h2>${md.name}</h2>
             </div>
-            <div class="flex" style="gap:.5rem;align-items:center">
-                <span class="badge ${md.status === 'completed' ? 'badge-teal' : 'badge-gold'}">${md.status}</span>
-                ${isComm ? `<button class="btn btn-sm btn-outline" id="btn-simulate">🎲 Simular</button>` : ''}
-                ${isComm && md.status === 'completed' ? `<button class="btn btn-sm" id="btn-reset-md" style="background:var(--accent-red,#e74c3c);color:#fff;font-size:.7rem">↺ Reset</button>` : ''}
-                ${isComm ? `<button class="btn btn-sm btn-primary" id="btn-add-match">+ Partido</button>` : ''}
-            </div>
+            <span class="badge ${md.status === 'completed' ? 'badge-teal' : md.status === 'active' ? 'badge-gold' : ''}">${statusIcon} ${md.status}</span>
         </div>
 
         <div class="card mb-2">
@@ -152,24 +92,22 @@ async function loadMatchday(container, mdId) {
                 return `
                 <div class="match-accordion" style="border-bottom:1px solid var(--border)">
                     <div class="match-header" data-mid="${m.id}" style="padding:.75rem;display:flex;align-items:center;gap:1rem;cursor:${hasScores ? 'pointer' : 'default'}">
-                        <span>${m.home_flag} <strong>${m.home_name}</strong></span>
+                        <span>${m.home_flag || ''} <strong>${m.home_name}</strong></span>
                         <span style="font-size:1.3rem;font-weight:700;color:var(--accent-gold);min-width:50px;text-align:center">
                             ${m.score_home != null ? `${m.score_home} - ${m.score_away}` : 'vs'}
                         </span>
-                        <span><strong>${m.away_name}</strong> ${m.away_flag}</span>
-                        <span class="badge ${m.status === 'finished' ? 'badge-teal' : 'badge-gold'}" style="margin-left:auto;font-size:.75rem">${m.status}</span>
+                        <span><strong>${m.away_name}</strong> ${m.away_flag || ''}</span>
+                        <span class="badge ${m.status === 'finished' ? 'badge-teal' : ''}" style="margin-left:auto;font-size:.75rem">${m.status}</span>
                         ${hasScores ? '<span style="color:var(--text-muted);font-size:.8rem">▼</span>' : ''}
-                        ${isComm && m.status !== 'finished' ? `<button class="btn btn-sm btn-outline result-btn" data-mid="${m.id}" style="font-size:.75rem">Resultado</button>` : ''}
-                        ${isComm ? `<button class="btn btn-sm btn-primary scores-btn" data-mid="${m.id}" data-home="${m.home_country}" data-away="${m.away_country}" style="font-size:.75rem">Scores</button>` : ''}
                     </div>
                     <div class="match-detail" id="detail-${m.id}" style="display:none;padding:0 .75rem .75rem">
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                             <div>
-                                <div style="font-weight:600;margin-bottom:.5rem">${m.home_flag} ${m.home_name}</div>
+                                <div style="font-weight:600;margin-bottom:.5rem">${m.home_flag || ''} ${m.home_name}</div>
                                 ${renderMatchPlayers(m.id, m.home_country)}
                             </div>
                             <div>
-                                <div style="font-weight:600;margin-bottom:.5rem">${m.away_name} ${m.away_flag}</div>
+                                <div style="font-weight:600;margin-bottom:.5rem">${m.away_name} ${m.away_flag || ''}</div>
                                 ${renderMatchPlayers(m.id, m.away_country)}
                             </div>
                         </div>
@@ -187,7 +125,6 @@ async function loadMatchday(container, mdId) {
     // Accordion toggle
     container.querySelectorAll('.match-header').forEach(header => {
         header.addEventListener('click', (e) => {
-            if (e.target.closest('.btn')) return; // Don't toggle when clicking buttons
             const detail = document.getElementById('detail-' + header.dataset.mid);
             if (detail && detail.innerHTML.trim()) {
                 detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
@@ -219,145 +156,4 @@ async function loadMatchday(container, mdId) {
             `;
         }
     } catch {}
-
-    // Simulate scores
-    document.getElementById('btn-simulate')?.addEventListener('click', async () => {
-        if (!confirm('¿Simular puntuaciones aleatorias para esta jornada?')) return;
-        try {
-            await API.post(`/scoring/matchdays/${mdId}/simulate`);
-            showToast('Puntuaciones simuladas', 'success');
-            loadMatchday(container, mdId);
-        } catch (err) { showToast(err.message, 'error'); }
-    });
-
-    // Reset matchday scores
-    document.getElementById('btn-reset-md')?.addEventListener('click', async () => {
-        if (!confirm('¿Resetear todas las puntuaciones de esta jornada?')) return;
-        try {
-            await API.post(`/scoring/matchdays/${mdId}/reset`);
-            showToast('Jornada reseteada', 'success');
-            loadMatchday(container, mdId);
-        } catch (err) { showToast(err.message, 'error'); }
-    });
-
-    // Add match
-    document.getElementById('btn-add-match')?.addEventListener('click', async () => {
-        const countries = await API.get('/countries');
-        showModal(`
-            <div class="modal-title">Añadir Partido</div>
-            <div class="form-group">
-                <label>ID partido</label>
-                <input type="text" id="match-id" placeholder="ESP-CRC">
-            </div>
-            <div class="form-group">
-                <label>Local</label>
-                <select id="match-home">${countries.map(c => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select>
-            </div>
-            <div class="form-group">
-                <label>Visitante</label>
-                <select id="match-away">${countries.map(c => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('')}</select>
-            </div>
-            <button class="btn btn-gold" id="btn-confirm-match">Añadir</button>
-        `);
-        document.getElementById('btn-confirm-match').addEventListener('click', async () => {
-            try {
-                await API.post(`/scoring/matchdays/${mdId}/matches`, {
-                    id: document.getElementById('match-id').value,
-                    home_country: document.getElementById('match-home').value,
-                    away_country: document.getElementById('match-away').value,
-                });
-                closeModal();
-                showToast('Partido añadido', 'success');
-                loadMatchday(container, mdId);
-            } catch (err) { showToast(err.message, 'error'); }
-        });
-    });
-
-    // Match result
-    container.querySelectorAll('.result-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            showModal(`
-                <div class="modal-title">Resultado</div>
-                <div class="flex" style="justify-content:center;gap:1rem;margin:1rem 0">
-                    <input type="number" id="res-home" min="0" value="0" style="width:60px;text-align:center;font-size:1.5rem">
-                    <span style="font-size:1.5rem">-</span>
-                    <input type="number" id="res-away" min="0" value="0" style="width:60px;text-align:center;font-size:1.5rem">
-                </div>
-                <button class="btn btn-gold" id="btn-save-result" style="width:100%">Guardar</button>
-            `);
-            document.getElementById('btn-save-result').addEventListener('click', async () => {
-                try {
-                    await API.patch(`/scoring/matches/${btn.dataset.mid}/result`, {
-                        score_home: parseInt(document.getElementById('res-home').value),
-                        score_away: parseInt(document.getElementById('res-away').value),
-                    });
-                    closeModal();
-                    showToast('Resultado guardado', 'success');
-                    loadMatchday(container, mdId);
-                } catch (err) { showToast(err.message, 'error'); }
-            });
-        });
-    });
-
-    // Enter scores
-    container.querySelectorAll('.scores-btn').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const home = btn.dataset.home;
-            const away = btn.dataset.away;
-            const matchId = btn.dataset.mid;
-            const homePlayers = await API.get(`/players?country=${home}&limit=50`);
-            const awayPlayers = await API.get(`/players?country=${away}&limit=50`);
-            const allPlayers = [...homePlayers, ...awayPlayers];
-
-            showModal(`
-                <div class="modal-title">Puntuaciones — ${home} vs ${away}</div>
-                <div style="max-height:60vh;overflow-y:auto">
-                    <table style="font-size:.8rem">
-                        <thead><tr><th>Jugador</th><th>Min</th><th>Gol</th><th>Asist</th><th>TA</th><th>TR</th><th>MVP</th></tr></thead>
-                        <tbody>
-                            ${allPlayers.slice(0, 50).map(p => `
-                                <tr data-pid="${p.id}">
-                                    <td>${p.name} <small>${p.country_code}</small></td>
-                                    <td><input type="number" class="sc-min" min="0" max="120" value="0" style="width:45px"></td>
-                                    <td><input type="number" class="sc-goals" min="0" value="0" style="width:35px"></td>
-                                    <td><input type="number" class="sc-assists" min="0" value="0" style="width:35px"></td>
-                                    <td><input type="number" class="sc-yc" min="0" max="2" value="0" style="width:35px"></td>
-                                    <td><input type="checkbox" class="sc-rc"></td>
-                                    <td><input type="checkbox" class="sc-mvp"></td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-                <button class="btn btn-gold mt-1" id="btn-submit-scores" style="width:100%">Guardar puntuaciones</button>
-            `);
-
-            document.getElementById('btn-submit-scores').addEventListener('click', async () => {
-                const rows = document.querySelectorAll('#modal-content tr[data-pid]');
-                const scores = [];
-                rows.forEach(row => {
-                    const min = parseInt(row.querySelector('.sc-min').value) || 0;
-                    if (min > 0) {
-                        scores.push({
-                            player_id: row.dataset.pid,
-                            minutes_played: min,
-                            goals: parseInt(row.querySelector('.sc-goals').value) || 0,
-                            assists: parseInt(row.querySelector('.sc-assists').value) || 0,
-                            yellow_cards: parseInt(row.querySelector('.sc-yc').value) || 0,
-                            red_card: row.querySelector('.sc-rc').checked,
-                            is_mvp: row.querySelector('.sc-mvp').checked,
-                        });
-                    }
-                });
-                try {
-                    await API.post(`/scoring/matchdays/${mdId}/scores`, { match_id: matchId, scores });
-                    closeModal();
-                    showToast(`${scores.length} puntuaciones guardadas`, 'success');
-                    loadMatchday(container, mdId);
-                } catch (err) { showToast(err.message, 'error'); }
-            });
-        });
-    });
 }
