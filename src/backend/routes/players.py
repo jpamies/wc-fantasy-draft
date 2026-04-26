@@ -91,3 +91,60 @@ async def list_countries():
         return [CountryOut(**dict(r)) for r in rows]
     finally:
         await db.close()
+
+
+@router.get("/players/{player_id}/stats")
+async def get_player_stats(player_id: str):
+    """Get player details + tournament stats from simulator, plus fantasy points."""
+    result = {"player": None, "sim_stats": None, "fantasy_scores": []}
+
+    # 1. Player bio from simulator
+    if _use_simulator:
+        from src.backend.services.simulator_client import get_client
+        client = get_client()
+        try:
+            resp = await client.get(f"/api/v1/players/{player_id}")
+            if resp.status_code == 200:
+                result["player"] = resp.json()
+        except Exception:
+            pass
+
+        # 2. Tournament stats from simulator
+        try:
+            resp = await client.get(f"/api/v1/stats/player/{player_id}")
+            if resp.status_code == 200:
+                result["sim_stats"] = resp.json()
+        except Exception:
+            pass
+
+    # 3. Fantasy scoring data from local DB
+    from src.backend.database import get_db
+    db = await get_db()
+    try:
+        scores = await db.execute_fetchall(
+            """SELECT ms.matchday_id, ms.match_id, ms.minutes_played, ms.goals, ms.assists,
+                      ms.yellow_cards, ms.red_card, ms.clean_sheet, ms.saves,
+                      ms.goals_conceded, ms.rating, ms.total_points
+               FROM match_scores ms WHERE ms.player_id=?
+               ORDER BY ms.matchday_id""",
+            (player_id,),
+        )
+        result["fantasy_scores"] = [dict(s) for s in scores]
+
+        # If no player from simulator, try local DB
+        if not result["player"]:
+            row = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
+            if row:
+                r = dict(row[0])
+                result["player"] = {
+                    "id": r["id"], "name": r["name"], "country_code": r["country_code"],
+                    "position": r["position"], "club": r.get("club", ""),
+                    "photo": r.get("photo", ""), "market_value": r.get("market_value", 0),
+                    "age": r.get("age", 0),
+                }
+    finally:
+        await db.close()
+
+    if not result["player"]:
+        raise HTTPException(404, "Player not found")
+    return result

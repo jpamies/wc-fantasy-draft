@@ -179,7 +179,7 @@ Router.register('#/team', async (container) => {
                         <div class="player-name">
                             ${p.player_id === captainId ? '<span class="chip-badge cap">C</span>' : ''}
                             ${p.player_id === viceCaptainId ? '<span class="chip-badge vc">VC</span>' : ''}
-                            ${p.name} ${locked ? '🔒' : ''}
+                            <a href="#/player/${p.player_id}" style="color:inherit;text-decoration:none" onclick="event.stopPropagation()">${p.name}</a> ${locked ? '🔒' : ''}
                         </div>
                         <div class="player-meta">${p.country_code} · ${p.club} ${mdIcons ? `· ${mdIcons}` : ''}</div>
                     </div>

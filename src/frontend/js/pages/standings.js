@@ -144,7 +144,7 @@ Router.register('#/standings', async (container) => {
                     ${posBadge(p.position)}
                     ${p.is_captain ? '<span class="chip-badge cap" style="font-size:.65rem">C</span>' : ''}
                     ${p.is_vice_captain ? '<span class="chip-badge vc" style="font-size:.65rem">VC</span>' : ''}
-                    <span style="flex:1">${p.name}</span>
+                    <a href="#/player/${p.player_id}" style="flex:1;color:inherit;text-decoration:none">${p.name}</a>
                     <span style="font-size:.75rem;color:var(--text-muted)">${p.country_code}</span>
                     ${icons ? `<span style="font-size:.75rem">${icons}</span>` : ''}
                     ${p.minutes_played > 0 ? `<span style="font-size:.7rem;color:var(--text-muted)">${p.minutes_played}'</span>` : ''}

@@ -63,7 +63,7 @@ async function loadMatchday(container, mdId) {
         function playerRow(p) {
             return `<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.85rem">
                 ${posBadge(p.position)}
-                <span style="flex:1">${p.player_name}</span>
+                <a href="#/player/${p.player_id}" style="flex:1;color:inherit;text-decoration:none">${p.player_name}</a>
                 <span style="color:var(--text-muted)">${p.minutes_played}'</span>
                 ${p.goals ? `<span>⚽×${p.goals}</span>` : ''}
                 ${p.assists ? `<span>🅰️×${p.assists}</span>` : ''}
