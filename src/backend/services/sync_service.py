@@ -173,13 +173,27 @@ async def sync_results() -> dict:
                 (matchday_id, matchday_id, match.get("kickoff", ""), "group_stage"),
             )
             
+            # Ensure both countries exist for the match FK
+            home_code = match.get("home_code", "")
+            away_code = match.get("away_code", "")
+            if home_code:
+                await db.execute(
+                    "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
+                    (home_code, match.get("home_team", home_code)),
+                )
+            if away_code:
+                await db.execute(
+                    "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
+                    (away_code, match.get("away_team", away_code)),
+                )
+            
             # Insert match result (IGNORE if already exists — don't overwrite)
             await db.execute(
                 """INSERT OR IGNORE INTO matches (id, matchday_id, home_country, away_country,
                    kickoff, score_home, score_away, status)
                    VALUES (?, ?, ?, ?, ?, ?, ?, 'finished')""",
-                (match_id, matchday_id, match.get("home_code", ""),
-                 match.get("away_code", ""), match.get("kickoff", ""),
+                (match_id, matchday_id, home_code,
+                 away_code, match.get("kickoff", ""),
                  match.get("score_home"), match.get("score_away")),
             )
             
@@ -189,17 +203,17 @@ async def sync_results() -> dict:
                 position = s.get("position", "MID")
                 points = calculate_player_points(s, position)
                 
-                # Ensure player exists in local DB (FK)
+                # Ensure country exists FIRST (player has FK to country)
+                await db.execute(
+                    "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
+                    (s.get("country_code", ""), s.get("country_code", "")),
+                )
+                
+                # Ensure player exists in local DB (FK to countries)
                 await db.execute(
                     """INSERT OR IGNORE INTO players (id, name, country_code, position, market_value)
                        VALUES (?, ?, ?, ?, 0)""",
                     (player_id, s.get("player_name", ""), s.get("country_code", ""), position),
-                )
-                
-                # Ensure country exists
-                await db.execute(
-                    "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
-                    (s.get("country_code", ""), s.get("country_code", "")),
                 )
                 
                 # INSERT OR IGNORE: only insert new scores, never overwrite
