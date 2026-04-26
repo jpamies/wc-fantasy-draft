@@ -3,23 +3,17 @@ Router.register('#/team', async (container) => {
     const teamId = API.getTeamId();
     const team = await API.get(`/teams/${teamId}`);
 
-    // Get matchdays to show tabs
+    // Get all matchdays from simulator
     let matchdays = [];
+    let defaultMdIndex = 0;
     try {
-        const allMd = await API.get('/scoring/matchdays');
-        // Show: active + upcoming first, then last completed as fallback
-        const active = allMd.filter(md => md.status === 'active' || md.status === 'upcoming');
-        const completed = allMd.filter(md => md.status === 'completed');
-        if (active.length > 0) {
-            matchdays = active.slice(0, 3);
-        } else if (completed.length > 0) {
-            // All completed — show last 2 so user can review
-            matchdays = completed.slice(-2);
-        }
-        // If nothing, show all available
-        if (matchdays.length === 0 && allMd.length > 0) {
-            matchdays = allMd.slice(0, 3);
-        }
+        matchdays = await API.get('/scoring/matchdays');
+        // Default tab: first active, or first upcoming, or last completed
+        const activeIdx = matchdays.findIndex(md => md.status === 'active');
+        const upcomingIdx = matchdays.findIndex(md => md.status === 'upcoming');
+        if (activeIdx >= 0) defaultMdIndex = activeIdx;
+        else if (upcomingIdx >= 0) defaultMdIndex = upcomingIdx;
+        else if (matchdays.length > 0) defaultMdIndex = matchdays.length - 1;
     } catch {}
 
     const POS_LIMITS = {GK: {min:1, max:1}, DEF: {min:3, max:5}, MID: {min:2, max:5}, FWD: {min:1, max:3}};
@@ -47,18 +41,22 @@ Router.register('#/team', async (container) => {
             </div>
         </div>
         ${matchdays.length > 0 ? `
-        <div class="flex mb-2" style="gap:.5rem;border-bottom:2px solid var(--border);padding-bottom:.5rem">
-            ${matchdays.map((md, i) => `
-                <button class="btn ${i === 0 ? 'btn-gold' : 'btn-outline'} md-tab" data-mdid="${md.id}" style="font-size:.85rem">
-                    ${md.name.length > 20 ? md.name.substring(0, 20) + '…' : md.name}
-                    <span class="badge ${md.status === 'completed' ? 'badge-teal' : 'badge-gold'}" style="font-size:.7rem;margin-left:.3rem">${md.status === 'upcoming' ? '📋' : md.status === 'active' ? '🔴' : '✅'}</span>
-                </button>
-            `).join('')}
+        <div class="flex mb-2" id="md-tabs" style="gap:.4rem;border-bottom:2px solid var(--border);padding-bottom:.5rem;overflow-x:auto;flex-wrap:nowrap">
+            ${matchdays.map((md, i) => {
+                const icon = md.status === 'completed' ? '✅' : md.status === 'active' ? '🔴' : '📋';
+                const badgeClass = md.status === 'completed' ? 'badge-teal' : md.status === 'active' ? 'badge-gold' : '';
+                const shortName = md.name.replace(/Jornada /i, 'J').replace(/ — .*/, '');
+                return `
+                <button class="btn ${i === defaultMdIndex ? 'btn-gold' : 'btn-outline'} md-tab" data-mdid="${md.id}" style="font-size:.8rem;white-space:nowrap;padding:.4rem .7rem">
+                    ${shortName}
+                    <span class="badge ${badgeClass}" style="font-size:.65rem;margin-left:.2rem">${icon}</span>
+                </button>`;
+            }).join('')}
         </div>
         <div id="matchday-lineup-area"></div>
         ` : `
         <div class="card text-center" style="color:var(--text-muted)">
-            <p>No hay jornadas disponibles. La alineación por jornada estará disponible cuando se creen jornadas.</p>
+            <p>No hay jornadas disponibles. El calendario aparecerá cuando el simulador lo tenga listo.</p>
         </div>
         <div id="matchday-lineup-area"></div>
         `}
@@ -68,9 +66,14 @@ Router.register('#/team', async (container) => {
         const area = document.getElementById('matchday-lineup-area');
         if (!area) return;
 
-        // Highlight active tab
+        // Find matchday metadata
+        const mdMeta = matchdays.find(md => md.id === mdId) || {};
+        const isCompleted = mdMeta.status === 'completed';
+
+        // Highlight active tab and scroll into view
         container.querySelectorAll('.md-tab').forEach(btn => {
             btn.className = btn.dataset.mdid === mdId ? 'btn btn-gold md-tab' : 'btn btn-outline md-tab';
+            if (btn.dataset.mdid === mdId) btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
         });
 
         let lineup;
@@ -184,13 +187,16 @@ Router.register('#/team', async (container) => {
                             if (!posPlayers.length) return '';
                             return `
                                 <div class="pos-section"><small>${POS_LABELS[pos]} (${posPlayers.length})</small></div>
-                                ${posPlayers.map(p => renderChip(p, `
-                                    <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="${p.locked ? 'Partido ya jugado' : 'Al banquillo'}"${p.locked ? ' disabled' : ''}>
-                                        ${p.locked ? '🔒' : '↓'}
+                                ${posPlayers.map(p => {
+                                    const frozen = p.locked || isCompleted;
+                                    return renderChip(p, `
+                                    <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="${frozen ? 'Bloqueado' : 'Al banquillo'}"${frozen ? ' disabled' : ''}>
+                                        ${frozen ? '🔒' : '↓'}
                                     </button>
-                                    <button class="btn btn-sm ${p.player_id === captainId ? 'btn-gold' : 'btn-outline'} cap-btn" data-pid="${p.player_id}" title="Capitán"${p.locked ? ' disabled' : ''}>C</button>
-                                    <button class="btn btn-sm ${p.player_id === viceCaptainId ? 'btn-primary' : 'btn-outline'} vc-btn" data-pid="${p.player_id}" title="Vice" style="font-size:.7rem"${p.locked ? ' disabled' : ''}>VC</button>
-                                `)).join('')}
+                                    <button class="btn btn-sm ${p.player_id === captainId ? 'btn-gold' : 'btn-outline'} cap-btn" data-pid="${p.player_id}" title="Capitán"${frozen ? ' disabled' : ''}>C</button>
+                                    <button class="btn btn-sm ${p.player_id === viceCaptainId ? 'btn-primary' : 'btn-outline'} vc-btn" data-pid="${p.player_id}" title="Vice" style="font-size:.7rem"${frozen ? ' disabled' : ''}>VC</button>
+                                    `);
+                                }).join('')}
                             `;
                         }).join('')}
                     </div>
@@ -202,12 +208,13 @@ Router.register('#/team', async (container) => {
                             return `
                                 <div class="pos-section"><small>${POS_LABELS[pos]}</small></div>
                                 ${posPlayers.map(p => {
-                                    const canPromote = canAddPosition(pos) && !p.locked;
+                                    const frozen = p.locked || isCompleted;
+                                    const canPromote = canAddPosition(pos) && !frozen;
                                     return renderChip(p, `
                                         <button class="btn btn-sm ${canPromote ? 'btn-primary' : 'btn-outline'} start-btn" data-pid="${p.player_id}"
                                             ${canPromote ? '' : 'disabled'}
-                                            title="${p.locked ? 'Partido ya empezado' : !canAddPosition(pos) ? 'Posición llena' : 'Titular'}">
-                                            ${p.locked ? '🔒' : '↑'}
+                                            title="${frozen ? 'Bloqueado' : !canAddPosition(pos) ? 'Posición llena' : 'Titular'}">
+                                            ${frozen ? '🔒' : '↑'}
                                         </button>
                                     `);
                                 }).join('')}
@@ -216,9 +223,13 @@ Router.register('#/team', async (container) => {
                     </div>
                 </div>
 
+                ${isCompleted ? `
+                <div class="mt-1 text-center"><span style="color:var(--text-muted);font-size:.85rem">✅ Jornada completada — alineación bloqueada</span></div>
+                ` : `
                 <div class="mt-2 text-center">
                     <button class="btn btn-gold" id="btn-save-md-lineup">💾 Guardar alineación</button>
                 </div>
+                `}
             `;
 
             // Events
@@ -270,9 +281,9 @@ Router.register('#/team', async (container) => {
         btn.addEventListener('click', () => loadMatchdayLineup(btn.dataset.mdid));
     });
 
-    // Load first tab
+    // Load default tab (first active > first upcoming > last completed)
     if (matchdays.length > 0) {
-        loadMatchdayLineup(matchdays[0].id);
+        loadMatchdayLineup(matchdays[defaultMdIndex].id);
     } else if (team.players.length > 0) {
         // No matchdays — show default roster as read-only
         const area = document.getElementById('matchday-lineup-area');

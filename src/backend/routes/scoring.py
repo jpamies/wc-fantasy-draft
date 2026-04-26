@@ -35,18 +35,30 @@ async def list_matchdays():
 
     result = []
     for md in calendar:
-        md_status = status_map.get(md["id"], md.get("status", "upcoming"))
-        # If simulator says all matches finished, override to completed
+        # Local status overrides simulator status (sync sets active/completed)
+        local_status = status_map.get(md["id"])
+        sim_status = md.get("status", "scheduled")
         matches = md.get("matches", [])
+        some_finished = any(m.get("status") == "finished" for m in matches)
         all_finished = matches and all(m.get("status") == "finished" for m in matches)
-        if all_finished and md_status != "completed":
+
+        if local_status:
+            md_status = local_status
+        elif all_finished:
+            md_status = "completed"
+        elif some_finished:
             md_status = "active"
+        else:
+            md_status = "upcoming"  # map simulator's "scheduled" → "upcoming"
+
         result.append({
             "id": md["id"],
             "name": md.get("name", md["id"]),
             "date": md.get("date", ""),
             "phase": md.get("phase", "groups"),
             "status": md_status,
+            "match_count": len(matches),
+            "finished_count": sum(1 for m in matches if m.get("status") == "finished"),
         })
     return result
 
