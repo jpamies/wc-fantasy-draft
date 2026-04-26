@@ -141,33 +141,89 @@ async def get_league(league_id: str):
         await db.close()
 
 
-@router.get("/leagues/{league_id}/standings", response_model=list[StandingEntry])
+@router.get("/leagues/{league_id}/standings")
 async def get_standings(league_id: str):
+    """Full standings with per-matchday breakdown."""
     from src.backend.services.scoring_engine import ScoringEngine
     db = await get_db()
     try:
         teams = await db.execute_fetchall(
             "SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,)
         )
-        # Get all matchdays with results (active or completed)
         matchdays = await db.execute_fetchall(
-            "SELECT id FROM matchdays WHERE status IN ('active', 'completed')"
+            "SELECT id FROM matchdays WHERE status IN ('active', 'completed') ORDER BY id"
         )
+        md_ids = [dict(md)["id"] for md in matchdays]
 
         standings = []
         for t in teams:
             t = dict(t)
             total = 0
-            for md in matchdays:
-                total += await ScoringEngine.get_team_matchday_points(t["id"], dict(md)["id"])
+            md_points = {}
+            for md_id in md_ids:
+                pts = await ScoringEngine.get_team_matchday_points(t["id"], md_id)
+                total += pts
+                md_points[md_id] = pts
+            standings.append({
+                "team_id": t["id"], "team_name": t["team_name"],
+                "owner_nick": t["owner_nick"],
+                "display_name": t.get("display_name") or t["owner_nick"],
+                "total_points": total, "budget": t["budget"],
+                "matchday_points": md_points,
+            })
+        standings.sort(key=lambda x: x["total_points"], reverse=True)
+        return {"standings": standings, "matchday_ids": md_ids}
+    finally:
+        await db.close()
 
-            standings.append(StandingEntry(
-                team_id=t["id"], team_name=t["team_name"],
-                owner_nick=t["owner_nick"], display_name=t.get("display_name", ""),
-                total_points=total, budget=t["budget"]
-            ))
-        standings.sort(key=lambda x: x.total_points, reverse=True)
-        return standings
+
+@router.get("/leagues/{league_id}/team-lineup/{team_id}/{matchday_id}")
+async def get_team_lineup_public(league_id: str, team_id: str, matchday_id: str):
+    """Read-only view of a team's lineup for a matchday (for standings detail)."""
+    db = await get_db()
+    try:
+        # Verify team belongs to league
+        team = await db.execute_fetchall(
+            "SELECT id FROM fantasy_teams WHERE id=? AND league_id=?", (team_id, league_id)
+        )
+        if not team:
+            raise HTTPException(404, "Team not found in this league")
+
+        rows = await db.execute_fetchall(
+            """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain,
+                      p.name, p.country_code, p.position, p.club, p.photo,
+                      COALESCE(ms.total_points, 0) as matchday_points,
+                      COALESCE(ms.goals, 0) as goals,
+                      COALESCE(ms.assists, 0) as assists,
+                      COALESCE(ms.yellow_cards, 0) as yellow_cards,
+                      COALESCE(ms.red_card, 0) as red_card,
+                      COALESCE(ms.minutes_played, 0) as minutes_played
+               FROM matchday_lineups ml
+               JOIN players p ON ml.player_id = p.id
+               LEFT JOIN match_scores ms ON ms.player_id = ml.player_id AND ms.matchday_id = ?
+               WHERE ml.team_id=? AND ml.matchday_id=?
+               ORDER BY ml.is_starter DESC, p.position""",
+            (matchday_id, team_id, matchday_id),
+        )
+        if not rows:
+            # Fall back to team_players
+            rows = await db.execute_fetchall(
+                """SELECT tp.player_id, tp.is_starter, tp.is_captain, tp.is_vice_captain,
+                          p.name, p.country_code, p.position, p.club, p.photo,
+                          COALESCE(ms.total_points, 0) as matchday_points,
+                          COALESCE(ms.goals, 0) as goals,
+                          COALESCE(ms.assists, 0) as assists,
+                          COALESCE(ms.yellow_cards, 0) as yellow_cards,
+                          COALESCE(ms.red_card, 0) as red_card,
+                          COALESCE(ms.minutes_played, 0) as minutes_played
+                   FROM team_players tp
+                   JOIN players p ON tp.player_id = p.id
+                   LEFT JOIN match_scores ms ON ms.player_id = tp.player_id AND ms.matchday_id = ?
+                   WHERE tp.team_id=?
+                   ORDER BY tp.is_starter DESC, p.position""",
+                (matchday_id, team_id),
+            )
+        return {"players": [dict(r) for r in rows]}
     finally:
         await db.close()
 
