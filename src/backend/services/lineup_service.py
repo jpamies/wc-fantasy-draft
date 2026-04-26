@@ -195,6 +195,10 @@ async def swap_player(team_id: str, matchday_id: str, bench_player_id: str, star
         if bench["country_code"] in played_countries:
             return {"error": f"{bench['name']}'s country ({bench['country_code']}) has already played. Cannot promote to starter."}
         
+        # Validate: starter's country must NOT have played (locked players can't be moved)
+        if starter["country_code"] in played_countries:
+            return {"error": f"{starter['name']}'s country ({starter['country_code']}) has already played. Cannot move to bench."}
+        
         # Execute swap
         await db.execute(
             "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=? AND matchday_id=? AND player_id=?",

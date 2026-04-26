@@ -185,7 +185,9 @@ Router.register('#/team', async (container) => {
                             return `
                                 <div class="pos-section"><small>${POS_LABELS[pos]} (${posPlayers.length})</small></div>
                                 ${posPlayers.map(p => renderChip(p, `
-                                    <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="Al banquillo">↓</button>
+                                    <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="${p.locked ? 'Partido ya jugado' : 'Al banquillo'}"${p.locked ? ' disabled' : ''}>
+                                        ${p.locked ? '🔒' : '↓'}
+                                    </button>
                                     <button class="btn btn-sm ${p.player_id === captainId ? 'btn-gold' : 'btn-outline'} cap-btn" data-pid="${p.player_id}" title="Capitán"${p.locked ? ' disabled' : ''}>C</button>
                                     <button class="btn btn-sm ${p.player_id === viceCaptainId ? 'btn-primary' : 'btn-outline'} vc-btn" data-pid="${p.player_id}" title="Vice" style="font-size:.7rem"${p.locked ? ' disabled' : ''}>VC</button>
                                 `)).join('')}

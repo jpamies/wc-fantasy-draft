@@ -172,22 +172,24 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
         )
 
         # Get match kickoff times to determine lock status
+        # Get played countries from simulator + local matches
+        from src.backend.services.lineup_service import _get_played_countries
+        played_countries = await _get_played_countries(matchday_id)
+        
         matches = await db.execute_fetchall(
-            "SELECT home_country, away_country, kickoff, status FROM matches WHERE matchday_id=?",
+            "SELECT home_country, away_country, status FROM matches WHERE matchday_id=?",
             (matchday_id,),
         )
-        now = datetime.now(timezone.utc).isoformat()
-        locked_countries = set()
         for m in matches:
             m = dict(m)
-            if m["status"] in ("live", "finished") or (m["kickoff"] and m["kickoff"] <= now):
-                locked_countries.add(m["home_country"])
-                locked_countries.add(m["away_country"])
+            if m["status"] in ("live", "finished"):
+                played_countries.add(m["home_country"])
+                played_countries.add(m["away_country"])
 
         players = []
         for r in rows:
             r = dict(r)
-            r["locked"] = r["country_code"] in locked_countries
+            r["locked"] = r["country_code"] in played_countries
             players.append(r)
 
         return {"matchday_id": matchday_id, "team_id": team_id, "players": players}
@@ -197,24 +199,35 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
 
 @router.patch("/teams/{team_id}/matchday-lineup/{matchday_id}")
 async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpdate, auth: dict = Depends(get_current_team)):
-    """Update matchday-specific lineup with lock validation."""
+    """Update matchday-specific lineup with lock validation.
+    
+    Rules during active matchday:
+    - Can remove ANY starter (played or not) → they lose their points
+    - Can only ADD a starter whose country has NOT played yet
+    - Can't change captain/VC to a player whose country already played
+    - Bench players whose country already played are locked (can't touch)
+    """
     if auth["team_id"] != team_id:
         raise HTTPException(403, "Not your team")
 
+    # Get played countries from simulator (most reliable source)
+    from src.backend.services.lineup_service import _get_played_countries
+    played_countries = await _get_played_countries(matchday_id)
+    
+    # Also check local matches as fallback
     db = await get_db()
     try:
-        # Get locked countries (matches started or finished)
         matches = await db.execute_fetchall(
-            "SELECT home_country, away_country, kickoff, status FROM matches WHERE matchday_id=?",
+            "SELECT home_country, away_country, status FROM matches WHERE matchday_id=?",
             (matchday_id,),
         )
-        now = datetime.now(timezone.utc).isoformat()
-        locked_countries = set()
         for m in matches:
             m = dict(m)
-            if m["status"] in ("live", "finished") or (m["kickoff"] and m["kickoff"] <= now):
-                locked_countries.add(m["home_country"])
-                locked_countries.add(m["away_country"])
+            if m["status"] in ("live", "finished"):
+                played_countries.add(m["home_country"])
+                played_countries.add(m["away_country"])
+        
+        matchday_started = len(played_countries) > 0
 
         # Ensure matchday lineup exists
         existing = await db.execute_fetchall(
@@ -250,10 +263,19 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
             promoted = new_starters - current_starter_ids
             for pid in promoted:
                 player = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (pid,))
-                if player and dict(player[0])["country_code"] in locked_countries:
+                if player and dict(player[0])["country_code"] in played_countries:
                     pname = await db.execute_fetchall("SELECT name FROM players WHERE id=?", (pid,))
                     name = dict(pname[0])["name"] if pname else pid
                     raise HTTPException(409, f"No puedes titular a {name}: su partido ya ha empezado")
+
+            # Players being demoted from starter to bench — can't remove if country already played
+            demoted = current_starter_ids - new_starters
+            for pid in demoted:
+                player = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (pid,))
+                if player and dict(player[0])["country_code"] in played_countries:
+                    pname = await db.execute_fetchall("SELECT name FROM players WHERE id=?", (pid,))
+                    name = dict(pname[0])["name"] if pname else pid
+                    raise HTTPException(409, f"No puedes quitar a {name}: su partido ya se jugó")
 
             # Update lineup
             await db.execute(
@@ -269,14 +291,14 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
         if body.captain:
             # Can't set captain if locked
             cp = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (body.captain,))
-            if cp and dict(cp[0])["country_code"] in locked_countries:
+            if cp and dict(cp[0])["country_code"] in played_countries:
                 raise HTTPException(409, "No puedes cambiar el capitán: su partido ya ha empezado")
             await db.execute("UPDATE matchday_lineups SET is_captain=0 WHERE team_id=? AND matchday_id=?", (team_id, matchday_id))
             await db.execute("UPDATE matchday_lineups SET is_captain=1 WHERE team_id=? AND matchday_id=? AND player_id=?", (team_id, matchday_id, body.captain))
 
         if body.vice_captain:
             vcp = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (body.vice_captain,))
-            if vcp and dict(vcp[0])["country_code"] in locked_countries:
+            if vcp and dict(vcp[0])["country_code"] in played_countries:
                 raise HTTPException(409, "No puedes cambiar el vice-capitán: su partido ya ha empezado")
             await db.execute("UPDATE matchday_lineups SET is_vice_captain=0 WHERE team_id=? AND matchday_id=?", (team_id, matchday_id))
             await db.execute("UPDATE matchday_lineups SET is_vice_captain=1 WHERE team_id=? AND matchday_id=? AND player_id=?", (team_id, matchday_id, body.vice_captain))
