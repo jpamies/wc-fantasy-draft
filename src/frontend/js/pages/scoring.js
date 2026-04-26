@@ -95,6 +95,17 @@ async function loadMatchday(container, mdId) {
             ${md.matches.length === 0 ? '<p style="color:var(--text-muted)">Sin partidos</p>' : ''}
             ${md.matches.map(m => {
                 const hasScores = scoresByMatch[m.id] && Object.keys(scoresByMatch[m.id]).length > 0;
+                // Build goal scorers summary
+                let eventsSummary = '';
+                if (hasScores) {
+                    const allPlayers = Object.values(scoresByMatch[m.id]).flat();
+                    const goalScorers = allPlayers.filter(p => p.goals > 0)
+                        .map(p => `⚽ ${p.player_name}${p.goals > 1 ? ` ×${p.goals}` : ''}`)
+                        .slice(0, 6);
+                    const reds = allPlayers.filter(p => p.red_card).map(p => `🟥 ${p.player_name}`);
+                    const events = [...goalScorers, ...reds];
+                    if (events.length) eventsSummary = `<div style="font-size:.75rem;color:var(--text-secondary);padding:0 .75rem .3rem">${events.join(' · ')}</div>`;
+                }
                 return `
                 <div class="match-accordion" style="border-bottom:1px solid var(--border)">
                     <div class="match-header" data-mid="${m.id}" style="padding:.75rem;display:flex;align-items:center;gap:1rem;cursor:${hasScores ? 'pointer' : 'default'}">
@@ -106,6 +117,7 @@ async function loadMatchday(container, mdId) {
                         <span class="badge ${m.status === 'finished' ? 'badge-teal' : ''}" style="margin-left:auto;font-size:.75rem">${m.status}</span>
                         ${hasScores ? '<span style="color:var(--text-muted);font-size:.8rem">▼</span>' : ''}
                     </div>
+                    ${eventsSummary}
                     <div class="match-detail" id="detail-${m.id}" style="display:none;padding:0 .75rem .75rem">
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                             <div>

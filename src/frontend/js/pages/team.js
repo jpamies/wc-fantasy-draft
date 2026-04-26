@@ -112,9 +112,66 @@ Router.register('#/team', async (container) => {
             return getPositionCounts().GK >= 1;
         }
 
+        function autoLineup() {
+            // Pick best 11: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD
+            // Sort by avg_points DESC, then market_value DESC as tiebreaker
+            const sortFn = (a, b) => (b.avg_points || 0) - (a.avg_points || 0) || (b.market_value || 0) - (a.market_value || 0);
+            const available = lineup.players.filter(p => !p.locked);
+            const locked_starters = lineup.players.filter(p => p.locked && starterIds.has(p.player_id));
+
+            const byPos = {GK:[], DEF:[], MID:[], FWD:[]};
+            available.forEach(p => byPos[p.position]?.push(p));
+            Object.values(byPos).forEach(arr => arr.sort(sortFn));
+
+            // Start with locked starters (can't remove them)
+            const picks = new Set(locked_starters.map(p => p.player_id));
+            const posCounts = {GK:0, DEF:0, MID:0, FWD:0};
+            locked_starters.forEach(p => posCounts[p.position]++);
+
+            // Fill minimums first: 1 GK, 3 DEF, 2 MID, 1 FWD
+            const mins = {GK:1, DEF:3, MID:2, FWD:1};
+            for (const pos of ['GK','DEF','MID','FWD']) {
+                const need = mins[pos] - posCounts[pos];
+                for (let i = 0; i < need && byPos[pos].length; i++) {
+                    const p = byPos[pos].shift();
+                    picks.add(p.player_id);
+                    posCounts[pos]++;
+                }
+            }
+
+            // Fill remaining slots (11 - current) with best available respecting max limits
+            const remaining = [];
+            for (const pos of ['DEF','MID','FWD']) {
+                byPos[pos].forEach(p => remaining.push(p));
+            }
+            remaining.sort(sortFn);
+            for (const p of remaining) {
+                if (picks.size >= 11) break;
+                if (posCounts[p.position] < POS_LIMITS[p.position].max) {
+                    picks.add(p.player_id);
+                    posCounts[p.position]++;
+                }
+            }
+
+            starterIds = picks;
+            // Auto-captain: best avg_points starter
+            const starterList = lineup.players.filter(p => picks.has(p.player_id)).sort(sortFn);
+            if (starterList.length > 0) captainId = starterList[0].player_id;
+            if (starterList.length > 1) viceCaptainId = starterList[1].player_id;
+            render();
+        }
+
         function renderChip(p, actions) {
-            const pts = p.total_points || 0;
+            const mdPts = p.matchday_points || 0;
+            const avgPts = p.avg_points || 0;
+            const totalPts = p.total_points || 0;
             const locked = p.locked;
+            const mdIcons = [
+                p.matchday_goals > 0 ? `⚽×${p.matchday_goals}` : '',
+                p.matchday_assists > 0 ? `🅰️×${p.matchday_assists}` : '',
+                p.matchday_yellow_cards > 0 ? '🟨' : '',
+                p.matchday_red_card > 0 ? '🟥' : '',
+            ].filter(Boolean).join(' ');
             return `
                 <div class="player-chip" style="${locked ? 'opacity:.7;' : ''}">
                     <img src="${p.photo}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'">
@@ -124,10 +181,13 @@ Router.register('#/team', async (container) => {
                             ${p.player_id === viceCaptainId ? '<span class="chip-badge vc">VC</span>' : ''}
                             ${p.name} ${locked ? '🔒' : ''}
                         </div>
-                        <div class="player-meta">${p.country_code} · ${p.club}</div>
+                        <div class="player-meta">${p.country_code} · ${p.club} ${mdIcons ? `· ${mdIcons}` : ''}</div>
                     </div>
                     ${posBadge(p.position)}
-                    <span style="font-weight:700;color:var(--accent-teal);min-width:30px;text-align:right;font-size:.9rem">${pts > 0 ? pts : ''}</span>
+                    <div style="text-align:right;min-width:40px;line-height:1.2">
+                        ${mdPts ? `<div style="font-weight:700;color:var(--accent-teal);font-size:.9rem">${mdPts}</div>` : ''}
+                        <div style="font-size:.7rem;color:var(--text-muted)">${avgPts > 0 ? `⌀${avgPts}` : ''}</div>
+                    </div>
                     <div class="chip-actions">${actions}</div>
                 </div>`;
         }
@@ -227,7 +287,8 @@ Router.register('#/team', async (container) => {
                 ${isCompleted ? `
                 <div class="mt-1 text-center"><span style="color:var(--text-muted);font-size:.85rem">✅ Jornada completada — alineación bloqueada</span></div>
                 ` : `
-                <div class="mt-2 text-center">
+                <div class="mt-2 text-center" style="display:flex;gap:.5rem;justify-content:center">
+                    <button class="btn btn-outline" id="btn-auto-lineup">🤖 Auto-alineación</button>
                     <button class="btn btn-gold" id="btn-save-md-lineup">💾 Guardar alineación</button>
                 </div>
                 `}
@@ -258,6 +319,10 @@ Router.register('#/team', async (container) => {
                     if (captainId === viceCaptainId) captainId = '';
                     render();
                 });
+            });
+            document.getElementById('btn-auto-lineup')?.addEventListener('click', () => {
+                autoLineup();
+                showToast('🤖 Alineación automática aplicada — guarda para confirmar', 'success');
             });
             document.getElementById('btn-save-md-lineup')?.addEventListener('click', async () => {
                 if (starterIds.size === 11 && !validateGK()) {

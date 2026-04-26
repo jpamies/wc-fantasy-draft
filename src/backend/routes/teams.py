@@ -171,18 +171,40 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
                 )
             await db.commit()
 
-        # Fetch lineup with player details
+        # Fetch lineup with player details, matchday points, and avg points
         rows = await db.execute_fetchall(
             """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain,
                       p.name, p.country_code, p.position, p.club, p.photo, p.market_value,
-                      COALESCE(pts.total, 0) as total_points
+                      COALESCE(pts_all.total, 0) as total_points,
+                      COALESCE(pts_all.avg_pts, 0) as avg_points,
+                      COALESCE(pts_all.matches_played, 0) as matches_played,
+                      COALESCE(pts_md.md_points, 0) as matchday_points,
+                      COALESCE(pts_md.md_goals, 0) as matchday_goals,
+                      COALESCE(pts_md.md_assists, 0) as matchday_assists,
+                      COALESCE(pts_md.md_yellow, 0) as matchday_yellow_cards,
+                      COALESCE(pts_md.md_red, 0) as matchday_red_card,
+                      COALESCE(pts_md.md_minutes, 0) as matchday_minutes
                FROM matchday_lineups ml
                JOIN players p ON ml.player_id = p.id
-               LEFT JOIN (SELECT player_id, SUM(total_points) as total FROM match_scores GROUP BY player_id) pts
-                   ON pts.player_id = ml.player_id
+               LEFT JOIN (
+                   SELECT player_id, SUM(total_points) as total,
+                          ROUND(AVG(total_points), 1) as avg_pts,
+                          COUNT(*) as matches_played
+                   FROM match_scores GROUP BY player_id
+               ) pts_all ON pts_all.player_id = ml.player_id
+               LEFT JOIN (
+                   SELECT player_id,
+                          SUM(total_points) as md_points,
+                          SUM(goals) as md_goals,
+                          SUM(assists) as md_assists,
+                          SUM(yellow_cards) as md_yellow,
+                          MAX(red_card) as md_red,
+                          SUM(minutes_played) as md_minutes
+                   FROM match_scores WHERE matchday_id=? GROUP BY player_id
+               ) pts_md ON pts_md.player_id = ml.player_id
                WHERE ml.team_id=? AND ml.matchday_id=?
                ORDER BY ml.is_starter DESC""",
-            (team_id, matchday_id),
+            (matchday_id, team_id, matchday_id),
         )
 
         # Get match kickoff times to determine lock status
