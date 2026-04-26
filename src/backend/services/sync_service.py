@@ -143,13 +143,21 @@ async def sync_results() -> dict:
         new_matches = [m for m in finished if m["match"]["id"] not in synced_ids]
         
         if not new_matches and removed == 0:
-            return {"synced": 0, "already_synced": len(synced_ids), "message": "All up to date"}
+            # No new matches, but still recalculate team points (handles mid-matchday swaps)
+            active_mds = await db.execute_fetchall(
+                "SELECT id FROM matchdays WHERE status = 'active'"
+            )
+            if active_mds:
+                teams_scored = await _update_team_points([m["id"] for m in active_mds])
+            else:
+                teams_scored = 0
+            return {"synced": 0, "already_synced": len(synced_ids), "teams_recalculated": teams_scored, "message": "All up to date, team points recalculated"}
         
         # Ensure lineup snapshots exist for all teams in affected matchdays
         new_matchday_ids = list({e["match"]["matchday_id"] for e in new_matches})
         await _ensure_all_snapshots(new_matchday_ids)
         
-        # Ensure matchdays and matches exist in fantasy DB
+        # Insert NEW match scores only (don't touch existing ones)
         total_scores = 0
         for entry in new_matches:
             match = entry["match"]
@@ -157,16 +165,17 @@ async def sync_results() -> dict:
             match_id = match["id"]
             matchday_id = match["matchday_id"]
             
-            # Upsert matchday
+            # Upsert matchday (mark as active once it has results)
             await db.execute(
-                """INSERT OR IGNORE INTO matchdays (id, name, date, phase, status)
-                   VALUES (?, ?, ?, ?, 'completed')""",
+                """INSERT INTO matchdays (id, name, date, phase, status)
+                   VALUES (?, ?, ?, ?, 'active')
+                   ON CONFLICT(id) DO UPDATE SET status = 'active'""",
                 (matchday_id, matchday_id, match.get("kickoff", ""), "group_stage"),
             )
             
-            # Upsert match
+            # Insert match result (IGNORE if already exists — don't overwrite)
             await db.execute(
-                """INSERT OR REPLACE INTO matches (id, matchday_id, home_country, away_country,
+                """INSERT OR IGNORE INTO matches (id, matchday_id, home_country, away_country,
                    kickoff, score_home, score_away, status)
                    VALUES (?, ?, ?, ?, ?, ?, ?, 'finished')""",
                 (match_id, matchday_id, match.get("home_code", ""),
@@ -174,7 +183,7 @@ async def sync_results() -> dict:
                  match.get("score_home"), match.get("score_away")),
             )
             
-            # Calculate and store scores for each player
+            # Insert player scores (IGNORE if already exists — never overwrite user data)
             for s in stats:
                 player_id = s.get("player_id", "")
                 position = s.get("position", "MID")
@@ -193,8 +202,9 @@ async def sync_results() -> dict:
                     (s.get("country_code", ""), s.get("country_code", "")),
                 )
                 
+                # INSERT OR IGNORE: only insert new scores, never overwrite
                 await db.execute(
-                    """INSERT OR REPLACE INTO match_scores
+                    """INSERT OR IGNORE INTO match_scores
                        (player_id, matchday_id, match_id, minutes_played, goals, assists,
                         clean_sheet, yellow_cards, red_card, own_goals, penalties_missed,
                         penalties_saved, saves, goals_conceded, rating, total_points)
@@ -212,9 +222,12 @@ async def sync_results() -> dict:
         
         await db.commit()
         
-        # Calculate team fantasy points for synced matchdays
-        synced_matchday_ids = list({e["match"]["matchday_id"] for e in new_matches})
-        teams_scored = await _update_team_points(synced_matchday_ids)
+        # ALWAYS recalculate team points for ALL active matchdays (handles mid-matchday swaps)
+        active_mds = await db.execute_fetchall(
+            "SELECT id FROM matchdays WHERE status = 'active'"
+        )
+        all_active_md_ids = [m["id"] for m in active_mds]
+        teams_scored = await _update_team_points(all_active_md_ids)
         
         # Update sync state
         await db.execute(
