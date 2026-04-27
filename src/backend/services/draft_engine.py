@@ -1,5 +1,6 @@
 """Draft engine — manages the draft state machine, snake order, auto-pick."""
 import json
+import logging
 import random
 from datetime import datetime, timezone
 
@@ -216,6 +217,13 @@ class DraftEngine:
                     (next_round, next_pick, now, draft["id"]),
                 )
                 await db.execute("UPDATE leagues SET status='active' WHERE id=?", (league_id,))
+                # Bots never set their own lineup — give them a sane default 11
+                # so they actually score on every matchday.
+                try:
+                    from src.backend.services.bot_service import auto_lineup_all_bots
+                    await auto_lineup_all_bots(league_id)
+                except Exception as e:
+                    logging.getLogger("wc-fantasy.draft").warning(f"Failed to auto-lineup bots after draft completion: {e}")
             else:
                 await db.execute(
                     "UPDATE drafts SET current_round=?, current_pick=? WHERE id=?",

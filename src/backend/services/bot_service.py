@@ -116,6 +116,113 @@ async def enable_autodraft_for_bots(league_id: str):
         await db.close()
 
 
+async def set_default_lineup_for_bot(team_id: str) -> bool:
+    """Pick 11 starters + captain/VC for a bot team and persist in team_players.
+
+    Tries common formations in order and uses the first one whose position counts
+    can be filled by the bot's drafted players (sorted by strength desc).
+    Falls back to best-11 by strength if no formation fits.
+
+    The scoring engine falls back to team_players when matchday_lineups doesn't
+    exist for a given matchday — so this alone is enough for bots to score.
+    """
+    from src.backend.database import get_db
+
+    FORMATIONS = [
+        {"GK": 1, "DEF": 4, "MID": 3, "FWD": 3},
+        {"GK": 1, "DEF": 4, "MID": 4, "FWD": 2},
+        {"GK": 1, "DEF": 3, "MID": 4, "FWD": 3},
+        {"GK": 1, "DEF": 3, "MID": 5, "FWD": 2},
+        {"GK": 1, "DEF": 5, "MID": 3, "FWD": 2},
+        {"GK": 1, "DEF": 5, "MID": 4, "FWD": 1},
+        {"GK": 1, "DEF": 4, "MID": 5, "FWD": 1},
+    ]
+
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            """SELECT tp.player_id, p.position,
+                      COALESCE(p.strength, 0) AS strength,
+                      COALESCE(p.market_value, 0) AS market_value
+               FROM team_players tp JOIN players p ON tp.player_id = p.id
+               WHERE tp.team_id=?""",
+            (team_id,),
+        )
+        if not rows:
+            return False
+
+        players = [dict(r) for r in rows]
+        by_pos = {"GK": [], "DEF": [], "MID": [], "FWD": []}
+        for p in players:
+            by_pos.setdefault(p["position"], []).append(p)
+        for arr in by_pos.values():
+            arr.sort(key=lambda x: (x["strength"], x["market_value"]), reverse=True)
+
+        chosen = None
+        for f in FORMATIONS:
+            if all(len(by_pos.get(pos, [])) >= n for pos, n in f.items()):
+                picks = []
+                for pos, n in f.items():
+                    picks.extend(by_pos[pos][:n])
+                chosen = picks
+                break
+
+        if chosen is None:
+            all_sorted = sorted(players, key=lambda x: (x["strength"], x["market_value"]), reverse=True)
+            chosen = all_sorted[:11]
+
+        chosen_ids = {p["player_id"] for p in chosen}
+        sorted_starters = sorted(chosen, key=lambda x: (x["strength"], x["market_value"]), reverse=True)
+        captain_id = sorted_starters[0]["player_id"] if sorted_starters else None
+        vc_id = sorted_starters[1]["player_id"] if len(sorted_starters) > 1 else None
+
+        await db.execute(
+            "UPDATE team_players SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=?",
+            (team_id,),
+        )
+        for pid in chosen_ids:
+            await db.execute(
+                "UPDATE team_players SET is_starter=1 WHERE team_id=? AND player_id=?",
+                (team_id, pid),
+            )
+        if captain_id:
+            await db.execute(
+                "UPDATE team_players SET is_captain=1 WHERE team_id=? AND player_id=?",
+                (team_id, captain_id),
+            )
+        if vc_id:
+            await db.execute(
+                "UPDATE team_players SET is_vice_captain=1 WHERE team_id=? AND player_id=?",
+                (team_id, vc_id),
+            )
+        await db.commit()
+        logger.info(f"Bot lineup set for team {team_id}: 11 starters, cap={captain_id}, vc={vc_id}")
+        return True
+    finally:
+        await db.close()
+
+
+async def auto_lineup_all_bots(league_id: str) -> int:
+    """Run set_default_lineup_for_bot for every bot team in the league."""
+    from src.backend.database import get_db
+    db = await get_db()
+    try:
+        bots = await db.execute_fetchall(
+            "SELECT id FROM fantasy_teams WHERE league_id=? AND owner_nick LIKE 'bot_%'",
+            (league_id,),
+        )
+        bot_ids = [dict(b)["id"] for b in bots]
+    finally:
+        await db.close()
+
+    count = 0
+    for bid in bot_ids:
+        if await set_default_lineup_for_bot(bid):
+            count += 1
+    logger.info(f"Auto-lineup applied to {count}/{len(bot_ids)} bots in league {league_id}")
+    return count
+
+
 async def remove_bots(league_id: str) -> int:
     """Remove all bot teams from a league. Returns count removed."""
     from src.backend.database import get_db

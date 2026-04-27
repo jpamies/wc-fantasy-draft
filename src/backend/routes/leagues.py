@@ -491,3 +491,18 @@ async def admin_reset_simulator(league_id: str, auth: dict = Depends(get_current
         await db.close()
 
     return {"ok": True, "message": "Simulador reseteado. La próxima sync (≤60s) traerá calendario limpio."}
+
+
+@router.post("/leagues/{league_id}/admin/auto-lineup-bots")
+async def admin_auto_lineup_bots(league_id: str, auth: dict = Depends(get_current_team)):
+    """Apply a default 11 + captain/VC to every bot team in this league.
+
+    Idempotent. Useful when bots were created before this feature existed and
+    are sitting on a roster of 23 players with no starters flagged → 0 points.
+    """
+    if auth["league_id"] != league_id or not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from src.backend.services.bot_service import auto_lineup_all_bots
+    count = await auto_lineup_all_bots(league_id)
+    return {"ok": True, "bots_processed": count}
