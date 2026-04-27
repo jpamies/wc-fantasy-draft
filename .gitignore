@@ -35,3 +35,4 @@ data/leagues/
 *.sqlite
 *.db
 kubectl
+data/wc_fantasy.db*
