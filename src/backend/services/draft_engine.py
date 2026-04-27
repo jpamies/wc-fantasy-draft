@@ -262,7 +262,7 @@ class DraftEngine:
                         from src.backend.services.simulator_client import fetch_all_squad_players
                         squad_pool = await fetch_all_squad_players()
                     candidates = [p for p in squad_pool if p["position"] == pos and p["id"] not in picked_ids]
-                    candidates.sort(key=lambda p: p.get("market_value", 0) or 0, reverse=True)
+                    candidates.sort(key=lambda p: (p.get("strength", 0) or 0, p.get("market_value", 0) or 0), reverse=True)
                     if candidates:
                         return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
                 else:
@@ -311,8 +311,8 @@ class DraftEngine:
                     term = search.lower()
                     available = [p for p in available if term in p["name"].lower()]
                 
-                # Sort by market value descending
-                available.sort(key=lambda p: p.get("market_value", 0), reverse=True)
+                # Sort by OVR (strength) descending, market_value as tiebreaker
+                available.sort(key=lambda p: (p.get("strength", 0) or 0, p.get("market_value", 0) or 0), reverse=True)
                 return available
 
             where = []
@@ -454,7 +454,7 @@ class DraftEngine:
                         from src.backend.services.simulator_client import fetch_all_squad_players
                         squad_pool = await fetch_all_squad_players()
                     candidates = [p for p in squad_pool if p["position"] == pos and p["id"] not in picked_set]
-                    candidates.sort(key=lambda p: p.get("market_value", 0) or 0, reverse=True)
+                    candidates.sort(key=lambda p: (p.get("strength", 0) or 0, p.get("market_value", 0) or 0), reverse=True)
                     if candidates:
                         return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
                 else:
