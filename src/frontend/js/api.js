@@ -12,6 +12,14 @@ const API = {
     isCommissioner() { return localStorage.getItem('wcf_is_commissioner') === 'true'; },
     setCommissioner(v) { localStorage.setItem('wcf_is_commissioner', String(v)); },
 
+    getCurrentTeam() {
+        return {
+            team_id: this.getTeamId(),
+            league_id: this.getLeagueId(),
+            is_commissioner: this.isCommissioner(),
+        };
+    },
+
     isLoggedIn() { return !!this.getToken(); },
 
     logout() {

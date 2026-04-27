@@ -29,11 +29,19 @@ async def lifespan(app: FastAPI):
     # (e.g. after a pod restart mid-cascade)
     watchdog_task = asyncio.create_task(_autodraft_watchdog())
 
+    # Start market window auto-transition watchdog
+    market_watchdog_task = asyncio.create_task(_market_auto_transition_watchdog())
+
     yield
 
     watchdog_task.cancel()
+    market_watchdog_task.cancel()
     try:
         await watchdog_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await market_watchdog_task
     except asyncio.CancelledError:
         pass
 
@@ -90,6 +98,78 @@ async def _autodraft_watchdog():
             raise
         except Exception as e:
             print(f"[autodraft watchdog] loop error: {e}")
+
+
+async def _market_auto_transition_watchdog():
+    """Automatically transition market windows when their phases end."""
+    from src.backend.database import get_db
+    from src.backend.services.market_service import MarketService
+    from datetime import datetime
+
+    print("Market auto-transition watchdog started.")
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            db = await get_db()
+            try:
+                # Get all non-completed market windows
+                windows = await db.execute_fetchall(
+                    """SELECT * FROM market_windows 
+                       WHERE status != 'completed'
+                       ORDER BY clause_window_start ASC"""
+                )
+            finally:
+                await db.close()
+
+            now = datetime.now().isoformat()
+
+            for window in windows:
+                try:
+                    status = window["status"]
+
+                    # clause_window → market_open
+                    if (status == "clause_window" and 
+                        window["clause_window_end"] and 
+                        now >= window["clause_window_end"]):
+                        print(f"[market watchdog] transitioning window {window['id']} to market_open")
+                        await MarketService.start_market_phase(window["id"])
+
+                    # market_open → market_closed
+                    elif (status == "market_open" and 
+                          window["market_window_end"] and 
+                          now >= window["market_window_end"]):
+                        print(f"[market watchdog] transitioning window {window['id']} to market_closed")
+                        await MarketService.close_market(window["id"])
+
+                    # market_closed → reposition_draft
+                    elif (status == "market_closed" and 
+                          window["reposition_draft_start"] and 
+                          now >= window["reposition_draft_start"]):
+                        print(f"[market watchdog] transitioning window {window['id']} to reposition_draft")
+                        await MarketService.start_reposition_draft(window["id"])
+
+                    # reposition_draft → completed
+                    elif (status == "reposition_draft" and 
+                          window["reposition_draft_end"] and 
+                          now >= window["reposition_draft_end"]):
+                        print(f"[market watchdog] transitioning window {window['id']} to completed")
+                        db = await get_db()
+                        try:
+                            await db.execute(
+                                "UPDATE market_windows SET status='completed', updated_at=? WHERE id=?",
+                                (now, window["id"]),
+                            )
+                            await db.commit()
+                        finally:
+                            await db.close()
+
+                except Exception as e:
+                    print(f"[market watchdog] error transitioning window {window['id']}: {e}")
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[market watchdog] loop error: {e}")
 
 
 app = FastAPI(
