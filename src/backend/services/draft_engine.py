@@ -504,14 +504,34 @@ class DraftEngine:
                 result = await DraftEngine.smart_pick(league_id, current_team)
 
             if "error" in result:
-                if has_autodraft:
+                # Don't disable autodraft for bots — they should always keep retrying.
+                # For human users, only disable if they had explicit autodraft enabled.
+                is_bot = await DraftEngine._is_bot_team(current_team)
+                if has_autodraft and not is_bot:
                     await DraftEngine.set_autodraft(league_id, current_team, False)
+                import logging
+                logging.getLogger("wc-fantasy.draft").warning(
+                    f"Autodraft pick failed for team={current_team} (bot={is_bot}): {result.get('error')}"
+                )
                 break
 
             result["auto_mode"] = "queue" if has_queue else "autodraft"
             results.append(result)
 
         return results
+
+    @staticmethod
+    async def _is_bot_team(team_id: str) -> bool:
+        db = await get_db()
+        try:
+            rows = await db.execute_fetchall(
+                "SELECT owner_nick FROM fantasy_teams WHERE id=?", (team_id,)
+            )
+            if not rows:
+                return False
+            return (rows[0]["owner_nick"] or "").startswith("bot_")
+        finally:
+            await db.close()
 
     # --- Draft Queue (Wishlist) methods — persisted in DB ---
 

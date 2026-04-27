@@ -65,6 +65,13 @@ async def _autodraft_watchdog():
                 await db.close()
             for row in rows:
                 league_id = row["league_id"]
+                # Defensive: ensure all bots in this league have autodraft enabled
+                # (in case they were created/reset without it being re-enabled).
+                try:
+                    from src.backend.services.bot_service import enable_autodraft_for_bots
+                    await enable_autodraft_for_bots(league_id)
+                except Exception:
+                    pass
                 state = await DraftEngine.get_draft_state(league_id)
                 if not state or state["status"] != "in_progress":
                     continue
