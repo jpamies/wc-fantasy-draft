@@ -53,7 +53,9 @@ async def _autodraft_watchdog():
     print("Autodraft watchdog started.")
     while True:
         try:
-            await asyncio.sleep(15)
+            # Long interval: WS connect already resumes drafts. This is just a
+            # safety net for fully-bot drafts with no clients connected.
+            await asyncio.sleep(120)
             db = await get_db()
             try:
                 rows = await db.execute_fetchall(

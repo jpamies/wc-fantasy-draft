@@ -250,6 +250,17 @@ async def draft_websocket(websocket: WebSocket, league_id: str):
         if state:
             await websocket.send_json({"type": "state", "state": state})
 
+        # If draft is stuck on a bot/autodraft turn (e.g. pod restart mid-cascade),
+        # resume it now that someone is watching.
+        if state and state.get("status") == "in_progress":
+            current_team = state.get("current_team_id")
+            if current_team:
+                has_auto = await DraftEngine.is_autodraft(league_id, current_team)
+                has_queue = await DraftEngine.has_queue(league_id, current_team)
+                if has_auto or has_queue:
+                    import asyncio
+                    asyncio.create_task(_process_and_broadcast_autodraft(league_id))
+
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
