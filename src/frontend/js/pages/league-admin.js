@@ -139,29 +139,65 @@ Router.register('#/admin/market', async (container) => {
 
 async function loadMarketsList(leagueId) {
     try {
-        // This would require an endpoint to list market windows
-        // For now, show placeholder
         const container = document.getElementById('markets-list');
         if (!container) return;
 
+        const windows = await API.get(`/leagues/${leagueId}/market-windows`);
+
+        const statusBadge = (s) => {
+            const map = {
+                pending: { cls: 'badge-gold', txt: 'Pendiente' },
+                clause_window: { cls: 'badge-teal', txt: 'Cláusulas' },
+                market_open: { cls: 'badge-teal', txt: 'Abierto' },
+                market_closed: { cls: 'badge-gold', txt: 'Cerrado' },
+                reposition_draft: { cls: 'badge-teal', txt: 'Reposición' },
+                completed: { cls: 'badge-muted', txt: 'Finalizado' },
+            };
+            const m = map[s] || { cls: 'badge-muted', txt: s };
+            return `<span class="badge ${m.cls}">${m.txt}</span>`;
+        };
+
         container.innerHTML = `
             <div class="card">
-                <div class="card-header">📊 Mercados Activos</div>
-                <p style="color:var(--text-muted)">
-                    💡 Para gestionar mercados activos, accede desde la página de liga.
-                </p>
-                <div style="background:var(--bg-secondary);padding:1rem;border-radius:4px;font-size:.85rem">
-                    <p><strong>Estados disponibles:</strong></p>
-                    <ul style="margin-left:1rem;margin-top:.5rem">
-                        <li>pending — Mercado creado, aún sin iniciar</li>
-                        <li>clause_window — Fase de protección de cláusulas abierta</li>
-                        <li>market_open — Mercado en transacciones</li>
-                        <li>reposition_draft — Draft de reposición en curso</li>
-                        <li>completed — Mercado finalizado</li>
-                    </ul>
-                </div>
+                <div class="card-header">📊 Mercados</div>
+                ${windows.length === 0 ? '<p style="color:var(--text-muted)">No hay mercados creados.</p>' : `
+                <table style="width:100%;font-size:.85rem">
+                    <thead><tr><th>Fase</th><th>Tipo</th><th>Estado</th><th>Inicio</th><th>Acciones</th></tr></thead>
+                    <tbody>
+                    ${windows.map(w => `
+                        <tr>
+                            <td>${w.phase}</td>
+                            <td>${w.market_type || '—'}</td>
+                            <td>${statusBadge(w.status)}</td>
+                            <td>${formatMadrid(w.clause_window_start)}</td>
+                            <td>
+                                ${['market_open','market_closed','reposition_draft'].includes(w.status) ? `
+                                    <button class="btn btn-sm btn-secondary btn-rewind-clause" data-wid="${w.id}">
+                                        ⏪ Rebobinar a Cláusulas
+                                    </button>
+                                ` : ''}
+                                <a href="#/market/${w.id}" class="btn btn-sm btn-outline">Ver</a>
+                            </td>
+                        </tr>
+                    `).join('')}
+                    </tbody>
+                </table>
+                `}
             </div>
         `;
+
+        container.querySelectorAll('.btn-rewind-clause').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('¿Rebobinar este mercado a la fase de Cláusulas? Se borrarán los picks del draft de reposición y los deadlines avanzarán 24h.')) return;
+                try {
+                    await API.post(`/leagues/${leagueId}/admin/market-windows/${btn.dataset.wid}/rewind-to-clause`, {});
+                    showToast('Mercado rebobinado a fase de Cláusulas', 'success');
+                    await loadMarketsList(leagueId);
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            });
+        });
     } catch (err) {
         console.error(err);
     }

@@ -156,21 +156,78 @@ async def market_tick(
         wid = w["id"]
         s = w["status"]
         try:
+            # Only ONE transition per call to avoid cascading through all phases at once.
             if s == "pending" and (_parse_iso(w["clause_window_start"]) or far_future) <= now_dt:
                 await MarketService.start_clause_phase(wid); transitions += 1
-                s = "clause_window"
-            if s == "clause_window" and (_parse_iso(w["clause_window_end"]) or far_future) <= now_dt:
+            elif s == "clause_window" and (_parse_iso(w["clause_window_end"]) or far_future) <= now_dt:
                 await MarketService.start_market_phase(wid); transitions += 1
-                s = "market_open"
-            if s == "market_open" and (_parse_iso(w["market_window_end"]) or far_future) <= now_dt:
+            elif s == "market_open" and (_parse_iso(w["market_window_end"]) or far_future) <= now_dt:
                 await MarketService.close_market(wid); transitions += 1
-                s = "market_closed"
-            if s == "market_closed" and (_parse_iso(w["reposition_draft_start"]) or far_future) <= now_dt:
+            elif s == "market_closed" and (_parse_iso(w["reposition_draft_start"]) or far_future) <= now_dt:
                 await MarketService.start_reposition_draft(wid); transitions += 1
         except Exception as e:
             logger.error(f"market-tick error on window {wid}: {e}")
 
     return {"ok": True, "transitions": transitions, "now_utc": now_dt.isoformat()}
+
+
+@router.post("/leagues/{league_id}/admin/market-windows/{window_id}/rewind-to-clause")
+async def rewind_to_clause(
+    league_id: str,
+    window_id: int,
+    current_team: dict = Depends(get_current_team),
+):
+    """Rewind a market window back to clause_window phase.
+
+    Clears any reposition_draft_picks and resets status. Also bumps
+    clause_window_end and later deadlines forward by 24h each so the
+    watchdog doesn't immediately re-cascade.
+    """
+    if current_team.get("league_id") != league_id or not current_team.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from datetime import datetime, timezone, timedelta
+    from src.backend.database import get_db
+
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            "SELECT * FROM market_windows WHERE id=? AND league_id=?",
+            (window_id, league_id),
+        )
+        if not rows:
+            raise HTTPException(404, "Window not found")
+        w = dict(rows[0])
+
+        # Wipe reposition draft picks (no transactions made yet at clause phase)
+        await db.execute(
+            "DELETE FROM reposition_draft_picks WHERE market_window_id=?",
+            (window_id,),
+        )
+
+        # Push deadlines forward
+        now = datetime.now(timezone.utc)
+        new_clause_end = (now + timedelta(hours=24)).isoformat()
+        new_market_end = (now + timedelta(hours=48)).isoformat()
+        new_repo_start = (now + timedelta(hours=49)).isoformat()
+        new_repo_end = (now + timedelta(hours=72)).isoformat()
+
+        await db.execute(
+            """UPDATE market_windows
+               SET status='clause_window',
+                   clause_window_end=?,
+                   market_window_end=?,
+                   reposition_draft_start=?,
+                   reposition_draft_end=?,
+                   updated_at=?
+               WHERE id=?""",
+            (new_clause_end, new_market_end, new_repo_start, new_repo_end, now.isoformat(), window_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    return {"ok": True, "window_id": window_id, "status": "clause_window"}
 
 
 @router.post("/leagues/{league_id}/admin/market-windows/{window_id}/start-market-phase")
