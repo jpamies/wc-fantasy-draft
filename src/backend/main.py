@@ -101,17 +101,25 @@ async def _autodraft_watchdog():
 
 
 def _parse_iso(s: str):
-    """Parse an ISO datetime string (with or without Z) to a tz-aware UTC datetime."""
+    """Parse an ISO datetime string to a tz-aware UTC datetime.
+
+    Naive strings (no timezone) are interpreted as Europe/Madrid local time,
+    matching what the frontend datetime-local input sends.
+    """
     from datetime import datetime, timezone
+    try:
+        from zoneinfo import ZoneInfo
+        MADRID = ZoneInfo("Europe/Madrid")
+    except Exception:
+        MADRID = timezone.utc  # fallback if tzdata missing
     if not s:
         return None
     try:
-        # Python's fromisoformat doesn't accept trailing 'Z' until 3.11
         if s.endswith("Z"):
             s = s[:-1] + "+00:00"
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=MADRID)
         return dt.astimezone(timezone.utc)
     except Exception:
         return None

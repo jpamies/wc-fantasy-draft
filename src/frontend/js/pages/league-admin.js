@@ -18,6 +18,9 @@ Router.register('#/admin/market', async (container) => {
             <div class="grid grid-2 mb-2">
                 <div class="card">
                     <div class="card-header">➕ Crear Nuevo Mercado</div>
+                    <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:.75rem">
+                        🕐 Todas las horas se interpretan como <strong>hora de Madrid</strong> (Europe/Madrid).
+                    </p>
                     <div class="form-group">
                         <label>Fase</label>
                         <input type="text" id="phase" placeholder="ej: Mercado_1_R32" required>
@@ -91,12 +94,13 @@ Router.register('#/admin/market', async (container) => {
             const data = {
                 phase: document.getElementById('phase').value,
                 market_type: document.getElementById('market-type').value,
-                clause_window_start: new Date(document.getElementById('clause-start').value).toISOString(),
-                clause_window_end: new Date(document.getElementById('clause-end').value).toISOString(),
-                market_window_start: new Date(document.getElementById('market-start').value).toISOString(),
-                market_window_end: new Date(document.getElementById('market-end').value).toISOString(),
-                reposition_draft_start: new Date(document.getElementById('reposition-start').value).toISOString(),
-                reposition_draft_end: new Date(document.getElementById('reposition-end').value).toISOString(),
+                // Send naive local datetime strings — backend interprets them as Europe/Madrid
+                clause_window_start: document.getElementById('clause-start').value,
+                clause_window_end: document.getElementById('clause-end').value,
+                market_window_start: document.getElementById('market-start').value,
+                market_window_end: document.getElementById('market-end').value,
+                reposition_draft_start: document.getElementById('reposition-start').value,
+                reposition_draft_end: document.getElementById('reposition-end').value,
                 max_buys: parseInt(document.getElementById('max-buys').value),
                 max_sells: parseInt(document.getElementById('max-sells').value),
             };

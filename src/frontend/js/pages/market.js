@@ -57,7 +57,7 @@ Router.register('#/market', async (container) => {
                                 <td>${w.phase}</td>
                                 <td>${w.market_type || '—'}</td>
                                 <td>${statusBadge(w.status)}</td>
-                                <td>${w.clause_window_start ? new Date(w.clause_window_start).toLocaleString() : '—'}</td>
+                                <td>${formatMadrid(w.clause_window_start)}</td>
                                 <td><a href="#/market/${w.id}" class="btn btn-sm btn-primary">Abrir</a></td>
                             </tr>
                         `).join('')}
@@ -163,7 +163,7 @@ Router.register('#/market/:windowId', async (container, params) => {
                     ${transactions.map(t => `
                         <div style="padding:.5rem;border-bottom:1px solid var(--border);font-size:.85rem">
                             <strong>${t.player_name}</strong> — ${t.direction === 'bought' ? '✅ Comprado' : '❌ Robado'} por ${formatMoney(t.clause_amount_paid)}
-                            <div style="color:var(--text-muted);font-size:.75rem">${new Date(t.transaction_date).toLocaleString()}</div>
+                            <div style="color:var(--text-muted);font-size:.75rem">${formatMadrid(t.transaction_date)}</div>
                         </div>
                     `).join('')}
                 </div>

@@ -55,6 +55,21 @@ function formatMoney(val) {
     return String(val);
 }
 
+/**
+ * Format a backend datetime string in Europe/Madrid time.
+ * Accepts both UTC ISO (with Z) and naive strings (treated as Madrid by browser).
+ */
+function formatMadrid(s) {
+    if (!s) return '—';
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleString('es-ES', {
+        timeZone: 'Europe/Madrid',
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+    });
+}
+
 function posBadge(pos) {
     return `<span class="badge badge-${pos.toLowerCase()}">${pos}</span>`;
 }
