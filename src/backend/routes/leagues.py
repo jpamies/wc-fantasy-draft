@@ -456,3 +456,37 @@ async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_te
         return {"ok": True, "message": "Liga reseteada a estado inicial"}
     finally:
         await db.close()
+
+
+@router.post("/leagues/{league_id}/admin/reset-simulator")
+async def admin_reset_simulator(league_id: str, auth: dict = Depends(get_current_team)):
+    """Reset wc-simulator (all simulated matches back to scheduled) and clear local match cache.
+    Affects ALL leagues that use this simulator. The next sync will repopulate clean state."""
+    if auth["league_id"] != league_id or not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from src.backend.config import settings
+    if not settings.SIMULATOR_API_URL:
+        raise HTTPException(400, "No simulator configured")
+
+    # 1. Call simulator reset
+    from src.backend.services.simulator_client import get_client
+    client = get_client()
+    try:
+        resp = await client.post("/api/v1/simulation/reset", timeout=30.0)
+        resp.raise_for_status()
+    except Exception as e:
+        raise HTTPException(502, f"Simulator reset failed: {e}")
+
+    # 2. Clear local match cache (sync will rebuild from simulator)
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM match_scores")
+        await db.execute("DELETE FROM matches")
+        await db.execute("DELETE FROM matchdays")
+        await db.execute("DELETE FROM sync_state")
+        await db.commit()
+    finally:
+        await db.close()
+
+    return {"ok": True, "message": "Simulador reseteado. La próxima sync (≤60s) traerá calendario limpio."}

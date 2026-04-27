@@ -87,12 +87,20 @@ async function renderLeaguePage(container) {
             </div>
             ` : ''}
 
-            <div>
+            <div style="margin-bottom:1rem">
                 <div style="font-weight:600;margin-bottom:.5rem">🔄 Resetear Liga</div>
                 <div style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.5rem">
                     Vuelve al estado inicial: elimina draft, jugadores, alineaciones, puntuaciones y bots. Los usuarios se mantienen.
                 </div>
                 <button class="btn btn-sm" id="btn-reset-league" style="background:var(--accent-red);color:#fff">↺ Resetear Liga</button>
+            </div>
+
+            <div>
+                <div style="font-weight:600;margin-bottom:.5rem">🌍 Resetear Simulador</div>
+                <div style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.5rem">
+                    Pone todos los partidos simulados como pendientes y limpia caché local de calendario/puntuaciones. <strong>Afecta a todas las ligas</strong> que usen este simulador.
+                </div>
+                <button class="btn btn-sm" id="btn-reset-simulator" style="background:var(--accent-red);color:#fff">↺ Resetear Simulador</button>
             </div>
         </div>
         ` : `
@@ -181,6 +189,15 @@ async function renderLeaguePage(container) {
         try {
             await API.post(`/leagues/${leagueId}/admin/reset`);
             showToast('Liga reseteada', 'success');
+            renderLeaguePage(container);
+        } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    document.getElementById('btn-reset-simulator')?.addEventListener('click', async () => {
+        if (!confirm('⚠️ ¿Resetear el simulador? Todos los partidos volverán a estado pendiente y se limpiará la caché local. Esto afecta a TODAS las ligas que usen este simulador.')) return;
+        try {
+            const res = await API.post(`/leagues/${leagueId}/admin/reset-simulator`);
+            showToast(res.message || 'Simulador reseteado', 'success');
             renderLeaguePage(container);
         } catch (err) { showToast(err.message, 'error'); }
     });
