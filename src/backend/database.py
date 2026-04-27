@@ -183,6 +183,87 @@ CREATE TABLE IF NOT EXISTS sync_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- MARKET & DRAFT TABLES
+
+CREATE TABLE IF NOT EXISTS market_windows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id TEXT NOT NULL REFERENCES leagues(id),
+    phase TEXT NOT NULL,
+    market_type TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','clause_window','market_open','market_closed','reposition_draft','completed')),
+    clause_window_start TEXT,
+    clause_window_end TEXT,
+    market_window_start TEXT,
+    market_window_end TEXT,
+    reposition_draft_start TEXT,
+    reposition_draft_end TEXT,
+    max_buys INTEGER DEFAULT 3,
+    max_sells INTEGER DEFAULT 3,
+    initial_budget INTEGER DEFAULT 100000000,
+    protect_budget INTEGER DEFAULT 300000000,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(league_id, phase)
+);
+
+CREATE TABLE IF NOT EXISTS player_clauses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    player_id TEXT NOT NULL REFERENCES players(id),
+    clause_amount INTEGER NOT NULL DEFAULT 0,
+    is_blocked INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(market_window_id, team_id, player_id)
+);
+
+CREATE TABLE IF NOT EXISTS market_budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    initial_budget INTEGER NOT NULL,
+    earned_from_sales INTEGER DEFAULT 0,
+    spent_on_buys INTEGER DEFAULT 0,
+    remaining_budget INTEGER NOT NULL,
+    buys_count INTEGER DEFAULT 0,
+    sells_count INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(market_window_id, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS market_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    buyer_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    seller_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    player_id TEXT NOT NULL REFERENCES players(id),
+    clause_amount_paid INTEGER NOT NULL,
+    transaction_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT DEFAULT 'completed' CHECK(status IN ('completed','failed','reverted')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS reposition_draft_picks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    pick_number INTEGER NOT NULL,
+    player_id TEXT REFERENCES players(id),
+    is_pass INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_windows_league ON market_windows(league_id);
+CREATE INDEX IF NOT EXISTS idx_player_clauses_market ON player_clauses(market_window_id);
+CREATE INDEX IF NOT EXISTS idx_player_clauses_team ON player_clauses(team_id);
+CREATE INDEX IF NOT EXISTS idx_market_budgets_market ON market_budgets(market_window_id);
+CREATE INDEX IF NOT EXISTS idx_market_transactions_market ON market_transactions(market_window_id);
+CREATE INDEX IF NOT EXISTS idx_market_transactions_buyer ON market_transactions(buyer_team_id);
+CREATE INDEX IF NOT EXISTS idx_market_transactions_seller ON market_transactions(seller_team_id);
+CREATE INDEX IF NOT EXISTS idx_reposition_picks_market ON reposition_draft_picks(market_window_id);
+CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(team_id);
 """
 
 
@@ -204,6 +285,29 @@ async def init_db():
             await db.execute("ALTER TABLE fantasy_teams ADD COLUMN display_name TEXT DEFAULT ''")
         except Exception:
             pass  # Column already exists
+        
+        # Migration: add market-related columns to fantasy_teams
+        try:
+            await db.execute("ALTER TABLE fantasy_teams ADD COLUMN protect_budget_allocated INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE fantasy_teams ADD COLUMN last_market_window_id INTEGER")
+        except Exception:
+            pass
+        
+        # Migration: add market-related columns to team_players
+        try:
+            await db.execute("ALTER TABLE team_players ADD COLUMN market_window_acquired INTEGER")
+        except Exception:
+            pass
+        
+        # Migration: add tournament_phase to matches
+        try:
+            await db.execute("ALTER TABLE matches ADD COLUMN tournament_phase TEXT")
+        except Exception:
+            pass
+        
         # Migration: update existing leagues from max_teams=8 to 10
         await db.execute("UPDATE leagues SET max_teams=10 WHERE max_teams=8")
         await db.commit()

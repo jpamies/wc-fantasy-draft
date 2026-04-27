@@ -248,3 +248,133 @@ class PlayerScoreOut(BaseModel):
     rating: float = 0.0
     bonus_points: int = 0
     total_points: int = 0
+
+
+# --- Market & Reposition Draft ---
+
+class MarketWindowCreate(BaseModel):
+    phase: str  # 'GRUPOS', 'Mercado_1_R32', etc.
+    market_type: str
+    clause_window_start: str
+    clause_window_end: str
+    market_window_start: str
+    market_window_end: str
+    reposition_draft_start: str
+    reposition_draft_end: str
+    max_buys: int = 3
+    max_sells: int = 3
+    initial_budget: int = 100000000
+    protect_budget: int = 300000000
+
+class MarketWindowUpdate(BaseModel):
+    clause_window_start: Optional[str] = None
+    clause_window_end: Optional[str] = None
+    market_window_start: Optional[str] = None
+    market_window_end: Optional[str] = None
+    reposition_draft_start: Optional[str] = None
+    reposition_draft_end: Optional[str] = None
+    max_buys: Optional[int] = None
+    max_sells: Optional[int] = None
+    initial_budget: Optional[int] = None
+    protect_budget: Optional[int] = None
+
+class MarketWindowOut(BaseModel):
+    id: int
+    league_id: str
+    phase: str
+    market_type: str
+    status: str
+    clause_window_start: Optional[str] = None
+    clause_window_end: Optional[str] = None
+    market_window_start: Optional[str] = None
+    market_window_end: Optional[str] = None
+    reposition_draft_start: Optional[str] = None
+    reposition_draft_end: Optional[str] = None
+    max_buys: int = 3
+    max_sells: int = 3
+    initial_budget: int = 100000000
+    protect_budget: int = 300000000
+    created_at: str
+
+class PlayerClauseIn(BaseModel):
+    player_id: str
+    clause_amount: int
+    is_blocked: bool = False
+
+class PlayerClausesSetRequest(BaseModel):
+    clauses: list[PlayerClauseIn]
+
+class PlayerClauseOut(BaseModel):
+    player_id: str
+    player_name: str = ""
+    clause_amount: int
+    is_blocked: bool = False
+
+class MarketBudgetOut(BaseModel):
+    initial_budget: int
+    earned_from_sales: int
+    spent_on_buys: int
+    remaining_budget: int
+    buys_count: int
+    sells_count: int
+    max_buys: int
+    max_sells: int
+
+class AvailablePlayerOut(BaseModel):
+    player_id: str
+    name: str
+    position: str
+    country_code: str
+    photo: str = ""
+    market_value: int = 0
+    current_team_id: str
+    current_team_name: str
+    clause_amount: int
+    is_blocked: bool = False
+
+class MarketTransactionOut(BaseModel):
+    id: int
+    buyer_team_id: str
+    buyer_team_name: str
+    seller_team_id: str
+    seller_team_name: str
+    player_id: str
+    player_name: str
+    clause_amount_paid: int
+    transaction_date: str
+    status: str
+
+class BuyPlayerRequest(BaseModel):
+    player_id: str
+
+class RepositionDraftOrderEntry(BaseModel):
+    team_id: str
+    team_name: str
+    owner_nick: str
+    remaining_budget: int
+    players_count: int
+    gk_count: int = 0
+    def_count: int = 0
+    mid_count: int = 0
+    fwd_count: int = 0
+
+class RepositionDraftState(BaseModel):
+    status: str  # 'waiting_turn', 'your_turn', 'completed'
+    current_turn_team_id: Optional[str] = None
+    current_turn_number: int = 0
+    draft_order: list[RepositionDraftOrderEntry] = Field(default_factory=list)
+    remaining_available_players: int = 0
+    my_picks: list = Field(default_factory=list)
+    leaderboard: list[RepositionDraftOrderEntry] = Field(default_factory=list)
+
+class RepositionAvailablePlayerOut(BaseModel):
+    player_id: str
+    name: str
+    position: str
+    country_code: str
+    photo: str = ""
+    market_value: int = 0
+
+class RepositionDraftPickRequest(BaseModel):
+    player_id: Optional[str] = None  # None = pasar turno
+
