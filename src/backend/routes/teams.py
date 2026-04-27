@@ -286,8 +286,8 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
                 )
 
         if body.starters is not None:
-            if len(body.starters) > 11:
-                raise HTTPException(400, "Maximum 11 starters")
+            if len(body.starters) != 11:
+                raise HTTPException(400, "La alineación debe tener exactamente 11 titulares")
 
             # Validate: can't ADD a locked player as starter (their match started)
             current_starters = await db.execute_fetchall(
@@ -306,14 +306,9 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
                     name = dict(pname[0])["name"] if pname else pid
                     raise HTTPException(409, f"No puedes titular a {name}: su partido ya ha empezado")
 
-            # Players being demoted from starter to bench — can't remove if country already played
-            demoted = current_starter_ids - new_starters
-            for pid in demoted:
-                player = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (pid,))
-                if player and dict(player[0])["country_code"] in played_countries:
-                    pname = await db.execute_fetchall("SELECT name FROM players WHERE id=?", (pid,))
-                    name = dict(pname[0])["name"] if pname else pid
-                    raise HTTPException(409, f"No puedes quitar a {name}: su partido ya se jugó")
+            # Note: demoting a played starter IS allowed — they simply lose their points
+            # for this matchday (final scoring uses current is_starter), enabling swaps
+            # like "benched player whose match is done → fresh bench player not yet played".
 
             # Update lineup
             await db.execute(

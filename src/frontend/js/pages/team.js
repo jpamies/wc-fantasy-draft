@@ -239,6 +239,7 @@ Router.register('#/team', async (container) => {
                 </div>
 
                 ${starterIds.size > 0 && !validateGK() ? '<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ Necesitas al menos 1 portero (GK) titular</div>' : ''}
+                ${!isCompleted && starterIds.size !== 11 ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ La alineación debe tener exactamente 11 titulares (tienes ${starterIds.size})</div>` : ''}
 
                 <div class="grid grid-2">
                     <div class="card">
@@ -249,13 +250,16 @@ Router.register('#/team', async (container) => {
                             return `
                                 <div class="pos-section"><small>${POS_LABELS[pos]} (${posPlayers.length})</small></div>
                                 ${posPlayers.map(p => {
-                                    const frozen = p.locked || isCompleted;
+                                    // A played starter CAN be benched (loses points to free a slot for an unplayed bench player).
+                                    // Captain/VC are still locked once the player's match started.
+                                    const benchFrozen = isCompleted;
+                                    const capFrozen = p.locked || isCompleted;
                                     return renderChip(p, `
-                                    <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="${frozen ? 'Bloqueado' : 'Al banquillo'}"${frozen ? ' disabled' : ''}>
-                                        ${frozen ? '🔒' : '↓'}
+                                    <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="${benchFrozen ? 'Bloqueado' : (p.locked ? 'Al banquillo (perderá puntos)' : 'Al banquillo')}"${benchFrozen ? ' disabled' : ''}>
+                                        ${benchFrozen ? '🔒' : '↓'}
                                     </button>
-                                    <button class="btn btn-sm ${p.player_id === captainId ? 'btn-gold' : 'btn-outline'} cap-btn" data-pid="${p.player_id}" title="Capitán"${frozen ? ' disabled' : ''}>C</button>
-                                    <button class="btn btn-sm ${p.player_id === viceCaptainId ? 'btn-primary' : 'btn-outline'} vc-btn" data-pid="${p.player_id}" title="Vice" style="font-size:.7rem"${frozen ? ' disabled' : ''}>VC</button>
+                                    <button class="btn btn-sm ${p.player_id === captainId ? 'btn-gold' : 'btn-outline'} cap-btn" data-pid="${p.player_id}" title="Capitán"${capFrozen ? ' disabled' : ''}>C</button>
+                                    <button class="btn btn-sm ${p.player_id === viceCaptainId ? 'btn-primary' : 'btn-outline'} vc-btn" data-pid="${p.player_id}" title="Vice" style="font-size:.7rem"${capFrozen ? ' disabled' : ''}>VC</button>
                                     `);
                                 }).join('')}
                             `;
@@ -325,7 +329,11 @@ Router.register('#/team', async (container) => {
                 showToast('🤖 Alineación automática aplicada — guarda para confirmar', 'success');
             });
             document.getElementById('btn-save-md-lineup')?.addEventListener('click', async () => {
-                if (starterIds.size === 11 && !validateGK()) {
+                if (starterIds.size !== 11) {
+                    showToast(`⚠️ La alineación debe tener exactamente 11 titulares (tienes ${starterIds.size})`, 'error');
+                    return;
+                }
+                if (!validateGK()) {
                     showToast('⚠️ Necesitas al menos 1 portero (GK) titular', 'error');
                     return;
                 }
