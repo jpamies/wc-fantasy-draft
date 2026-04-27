@@ -482,6 +482,7 @@ async def admin_reset_simulator(league_id: str, auth: dict = Depends(get_current
     db = await get_db()
     try:
         await db.execute("DELETE FROM match_scores")
+        await db.execute("DELETE FROM matchday_lineups")
         await db.execute("DELETE FROM matches")
         await db.execute("DELETE FROM matchdays")
         await db.execute("DELETE FROM sync_state")
