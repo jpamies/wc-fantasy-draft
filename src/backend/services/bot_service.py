@@ -194,6 +194,30 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
                 "UPDATE team_players SET is_vice_captain=1 WHERE team_id=? AND player_id=?",
                 (team_id, vc_id),
             )
+
+        # Propagate to any existing matchday_lineups snapshots so past/active
+        # matchdays score correctly when scoring engine prefers matchday_lineups.
+        await db.execute(
+            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=?",
+            (team_id,),
+        )
+        if chosen_ids:
+            placeholders = ",".join("?" * len(chosen_ids))
+            await db.execute(
+                f"UPDATE matchday_lineups SET is_starter=1 WHERE team_id=? AND player_id IN ({placeholders})",
+                (team_id, *chosen_ids),
+            )
+        if captain_id:
+            await db.execute(
+                "UPDATE matchday_lineups SET is_captain=1 WHERE team_id=? AND player_id=?",
+                (team_id, captain_id),
+            )
+        if vc_id:
+            await db.execute(
+                "UPDATE matchday_lineups SET is_vice_captain=1 WHERE team_id=? AND player_id=?",
+                (team_id, vc_id),
+            )
+
         await db.commit()
         logger.info(f"Bot lineup set for team {team_id}: 11 starters, cap={captain_id}, vc={vc_id}")
         return True

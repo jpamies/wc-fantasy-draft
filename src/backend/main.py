@@ -100,11 +100,28 @@ async def _autodraft_watchdog():
             print(f"[autodraft watchdog] loop error: {e}")
 
 
+def _parse_iso(s: str):
+    """Parse an ISO datetime string (with or without Z) to a tz-aware UTC datetime."""
+    from datetime import datetime, timezone
+    if not s:
+        return None
+    try:
+        # Python's fromisoformat doesn't accept trailing 'Z' until 3.11
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 async def _market_auto_transition_watchdog():
     """Automatically transition market windows when their phases end."""
     from src.backend.database import get_db
     from src.backend.services.market_service import MarketService
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     print("Market auto-transition watchdog started.")
     while True:
@@ -121,43 +138,51 @@ async def _market_auto_transition_watchdog():
             finally:
                 await db.close()
 
-            now = datetime.now().isoformat()
+            now_dt = datetime.now(timezone.utc)
 
             for window in windows:
                 try:
                     status = window["status"]
 
+                    # scheduled → clause_window
+                    if (status == "scheduled" and
+                        window["clause_window_start"] and
+                        now_dt >= (_parse_iso(window["clause_window_start"]) or now_dt)):
+                        print(f"[market watchdog] transitioning window {window['id']} to clause_window")
+                        await MarketService.start_clause_phase(window["id"])
+                        continue
+
                     # clause_window → market_open
-                    if (status == "clause_window" and 
-                        window["clause_window_end"] and 
-                        now >= window["clause_window_end"]):
+                    if (status == "clause_window" and
+                        window["clause_window_end"] and
+                        now_dt >= (_parse_iso(window["clause_window_end"]) or now_dt)):
                         print(f"[market watchdog] transitioning window {window['id']} to market_open")
                         await MarketService.start_market_phase(window["id"])
 
                     # market_open → market_closed
-                    elif (status == "market_open" and 
-                          window["market_window_end"] and 
-                          now >= window["market_window_end"]):
+                    elif (status == "market_open" and
+                          window["market_window_end"] and
+                          now_dt >= (_parse_iso(window["market_window_end"]) or now_dt)):
                         print(f"[market watchdog] transitioning window {window['id']} to market_closed")
                         await MarketService.close_market(window["id"])
 
                     # market_closed → reposition_draft
-                    elif (status == "market_closed" and 
-                          window["reposition_draft_start"] and 
-                          now >= window["reposition_draft_start"]):
+                    elif (status == "market_closed" and
+                          window["reposition_draft_start"] and
+                          now_dt >= (_parse_iso(window["reposition_draft_start"]) or now_dt)):
                         print(f"[market watchdog] transitioning window {window['id']} to reposition_draft")
                         await MarketService.start_reposition_draft(window["id"])
 
                     # reposition_draft → completed
-                    elif (status == "reposition_draft" and 
-                          window["reposition_draft_end"] and 
-                          now >= window["reposition_draft_end"]):
+                    elif (status == "reposition_draft" and
+                          window["reposition_draft_end"] and
+                          now_dt >= (_parse_iso(window["reposition_draft_end"]) or now_dt)):
                         print(f"[market watchdog] transitioning window {window['id']} to completed")
                         db = await get_db()
                         try:
                             await db.execute(
                                 "UPDATE market_windows SET status='completed', updated_at=? WHERE id=?",
-                                (now, window["id"]),
+                                (now_dt.isoformat(), window["id"]),
                             )
                             await db.commit()
                         finally:

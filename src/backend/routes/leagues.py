@@ -396,6 +396,21 @@ async def admin_remove_bots(league_id: str, auth: dict = Depends(get_current_tea
     return {"ok": True, "bots_removed": removed}
 
 
+@router.post("/leagues/{league_id}/admin/auto-lineup-bots")
+async def admin_auto_lineup_bots(league_id: str, auth: dict = Depends(get_current_team)):
+    """Force a default 11-starter lineup (with captain/VC) for every bot team in the league.
+
+    Useful when bots were drafted before the auto-lineup feature existed and currently have
+    no starters set, so they score 0 every matchday.
+    """
+    if auth["league_id"] != league_id or not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from src.backend.services.bot_service import auto_lineup_all_bots
+    count = await auto_lineup_all_bots(league_id)
+    return {"ok": True, "bots_lineup_set": count}
+
+
 @router.post("/leagues/{league_id}/admin/reset")
 async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_team)):
     """Reset league to setup state. Keeps human teams, removes bots, clears all game data."""

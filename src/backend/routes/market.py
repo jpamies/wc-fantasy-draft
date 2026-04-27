@@ -123,6 +123,56 @@ async def start_clause_phase(
         raise HTTPException(500, str(e))
 
 
+@router.post("/leagues/{league_id}/admin/market-tick")
+async def market_tick(
+    league_id: str,
+    current_team: dict = Depends(get_current_team),
+):
+    """Force-evaluate market window deadlines and run any due transitions now.
+
+    Useful when the watchdog hasn't run yet or to bypass timezone confusion.
+    Only transitions whose deadline has actually passed are applied.
+    """
+    if current_team.get("league_id") != league_id or not current_team.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from datetime import datetime, timezone, timedelta
+    from src.backend.database import get_db
+    from src.backend.main import _parse_iso
+
+    transitions = 0
+    db = await get_db()
+    try:
+        windows = await db.execute_fetchall(
+            "SELECT * FROM market_windows WHERE league_id=? AND status != 'completed'",
+            (league_id,),
+        )
+    finally:
+        await db.close()
+
+    now_dt = datetime.now(timezone.utc)
+    far_future = now_dt + timedelta(days=365)
+    for w in windows:
+        wid = w["id"]
+        s = w["status"]
+        try:
+            if s == "scheduled" and (_parse_iso(w["clause_window_start"]) or far_future) <= now_dt:
+                await MarketService.start_clause_phase(wid); transitions += 1
+                s = "clause_window"
+            if s == "clause_window" and (_parse_iso(w["clause_window_end"]) or far_future) <= now_dt:
+                await MarketService.start_market_phase(wid); transitions += 1
+                s = "market_open"
+            if s == "market_open" and (_parse_iso(w["market_window_end"]) or far_future) <= now_dt:
+                await MarketService.close_market(wid); transitions += 1
+                s = "market_closed"
+            if s == "market_closed" and (_parse_iso(w["reposition_draft_start"]) or far_future) <= now_dt:
+                await MarketService.start_reposition_draft(wid); transitions += 1
+        except Exception as e:
+            logger.error(f"market-tick error on window {wid}: {e}")
+
+    return {"ok": True, "transitions": transitions, "now_utc": now_dt.isoformat()}
+
+
 @router.post("/leagues/{league_id}/admin/market-windows/{window_id}/start-market-phase")
 async def start_market_phase(
     league_id: str,

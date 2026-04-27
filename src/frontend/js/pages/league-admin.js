@@ -65,6 +65,22 @@ Router.register('#/admin/market', async (container) => {
 
                 <div id="markets-list"></div>
             </div>
+
+            <div class="card mb-2">
+                <div class="card-header">🔧 Acciones rápidas</div>
+                <div class="grid grid-2">
+                    <button class="btn btn-secondary" id="btn-fix-bot-lineups">
+                        🤖 Arreglar alineaciones de bots
+                    </button>
+                    <button class="btn btn-secondary" id="btn-force-market-tick">
+                        ⏱️ Forzar avance de fase de mercado
+                    </button>
+                </div>
+                <p style="color:var(--text-muted);font-size:.85rem;margin-top:.5rem">
+                    Las alineaciones se aplican a los bots con 23 jugadores pero sin titulares (problema histórico).
+                    El forzado de fase ejecuta la transición ahora si el deadline ya pasó.
+                </p>
+            </div>
         `;
 
         // Load markets list
@@ -94,6 +110,23 @@ Router.register('#/admin/market', async (container) => {
             }
         });
 
+        document.getElementById('btn-fix-bot-lineups').addEventListener('click', async () => {
+            try {
+                const r = await API.post(`/leagues/${leagueId}/admin/auto-lineup-bots`, {});
+                showToast(`Alineaciones aplicadas a ${r.bots_lineup_set} bots`, 'success');
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        });
+
+        document.getElementById('btn-force-market-tick').addEventListener('click', async () => {
+            try {
+                const r = await API.post(`/leagues/${leagueId}/admin/market-tick`, {});
+                showToast(r.transitions > 0 ? `Avance: ${r.transitions} ventana(s)` : 'No hay transiciones pendientes', 'success');
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        });
     } catch (err) {
         container.innerHTML = `<div class="card text-center"><p>Error: ${err.message}</p></div>`;
         console.error(err);
