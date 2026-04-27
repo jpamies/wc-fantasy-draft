@@ -193,6 +193,41 @@ Router.register('#/market/:windowId', async (container, params) => {
     }
 });
 
+// Preset clause amounts (in millions of EUR)
+const CLAUSE_PRESETS = [
+    { v: 0, label: 'SELL' },
+    { v: 1_000_000, label: '1M' },
+    { v: 5_000_000, label: '5M' },
+    { v: 15_000_000, label: '15M' },
+    { v: 25_000_000, label: '25M' },
+    { v: 50_000_000, label: '50M' },
+    { v: 80_000_000, label: '80M' },
+];
+
+// Convert ISO-3 country code to ISO-2 for flag emoji rendering (fallback when flag string missing)
+const ISO3_TO_ISO2 = {
+    ARG:'AR', AUS:'AU', AUT:'AT', BEL:'BE', BRA:'BR', CAN:'CA', CHL:'CL', CHN:'CN', CIV:'CI',
+    CMR:'CM', COL:'CO', CRC:'CR', CRO:'HR', CZE:'CZ', DEN:'DK', ECU:'EC', EGY:'EG', ENG:'GB-ENG',
+    ESP:'ES', FRA:'FR', GER:'DE', GHA:'GH', GRE:'GR', HON:'HN', IRN:'IR', ISL:'IS', ITA:'IT',
+    JPN:'JP', KOR:'KR', KSA:'SA', MAR:'MA', MEX:'MX', NED:'NL', NGA:'NG', NOR:'NO', NZL:'NZ',
+    PAR:'PY', PER:'PE', POL:'PL', POR:'PT', QAT:'QA', RSA:'ZA', RUS:'RU', SCO:'GB-SCT', SEN:'SN',
+    SRB:'RS', SUI:'CH', SVK:'SK', SWE:'SE', TUN:'TN', TUR:'TR', UAE:'AE', UKR:'UA', URU:'UY',
+    USA:'US', UZB:'UZ', WAL:'GB-WLS',
+};
+
+function flagFor(player) {
+    if (player.country_flag) return player.country_flag;
+    const iso2 = ISO3_TO_ISO2[player.country_code];
+    if (!iso2 || iso2.length !== 2) return '';
+    // Convert ISO-2 to regional indicator emoji
+    const A = 0x1F1E6;
+    return String.fromCodePoint(A + iso2.charCodeAt(0) - 65, A + iso2.charCodeAt(1) - 65);
+}
+
+function positionBadgeClass(pos) {
+    return ({ GK:'badge-gold', DEF:'badge-teal', MID:'badge-muted', FWD:'badge-teal' })[pos] || 'badge-muted';
+}
+
 async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
     try {
         const form = document.getElementById('clauses-form');
@@ -200,70 +235,132 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
 
         form.innerHTML = '<div class="text-center">Cargando...</div>';
 
-        // Get team players
         const team = await API.get(`/teams/${teamId}`);
+        const protectBudget = win.protect_budget;
+        const MAX_BLOCKED = 2;
+
+        // Sort: starters first, then by market_value desc
+        const players = [...team.players].sort((a, b) => {
+            if (a.is_starter !== b.is_starter) return b.is_starter - a.is_starter;
+            return (b.market_value || 0) - (a.market_value || 0);
+        });
+
+        const clauseFor = (pid) => clauses.find(c => c.player_id === pid);
 
         form.innerHTML = `
-            <div id="clauses-summary" style="margin-bottom:1rem;padding:.5rem;background:var(--bg-secondary);border-radius:4px">
-                <strong>Total:</strong> <span id="clauses-total">0</span> / ${formatMoney(win.protect_budget)} ·
-                <strong>Bloqueados:</strong> <span id="clauses-blocked">0</span> / 2
+            <div id="clauses-summary" style="position:sticky;top:0;z-index:5;margin-bottom:1rem;padding:.75rem;background:var(--bg-secondary);border-radius:6px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+                <div><strong>Total asignado:</strong> <span id="clauses-total">0</span> / ${formatMoney(protectBudget)}</div>
+                <div><strong>Bloqueados:</strong> <span id="clauses-blocked">0</span> / ${MAX_BLOCKED}</div>
+                <div><strong>Restante:</strong> <span id="clauses-remaining">${formatMoney(protectBudget)}</span></div>
             </div>
-        ` + team.players.map(p => `
-            <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border)">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
-                    <strong>${p.name} (${p.position})</strong>
-                    <label style="display:flex;align-items:center;gap:.25rem;font-size:.8rem">
-                        <input type="checkbox" class="blocked-checkbox" data-pid="${p.player_id}" 
-                            ${clauses.some(c => c.player_id === p.player_id && c.is_blocked) ? 'checked' : ''}>
-                        Bloqueado
-                    </label>
-                </div>
-                <input type="range" class="clause-slider" data-pid="${p.player_id}" 
-                    min="0" max="${win.protect_budget}" step="1000000" style="width:100%"
-                    value="${clauses.find(c => c.player_id === p.player_id)?.clause_amount || 0}">
-                <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--text-secondary)">
-                    <span>0M</span>
-                    <span class="clause-value" data-pid="${p.player_id}">
-                        ${formatMoney(clauses.find(c => c.player_id === p.player_id)?.clause_amount || 0)}
-                    </span>
-                    <span>${formatMoney(win.protect_budget)}</span>
-                </div>
+            <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem">
+            ${players.map(p => {
+                const c = clauseFor(p.player_id);
+                const amount = c?.clause_amount || 0;
+                const blocked = !!c?.is_blocked;
+                const flag = flagFor(p);
+                return `
+                <div class="card clause-card" data-pid="${p.player_id}" data-amount="${amount}" data-blocked="${blocked ? '1' : '0'}"
+                    style="padding:.75rem;display:flex;flex-direction:column;gap:.5rem">
+                    <div style="display:flex;align-items:center;gap:.5rem">
+                        <div style="font-size:1.5rem;line-height:1">${flag}</div>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.name}">${p.name}</div>
+                            <div style="font-size:.7rem;color:var(--text-muted)">${p.country_code} · ${p.club || ''}</div>
+                        </div>
+                        <span class="badge ${positionBadgeClass(p.position)} badge-small">${p.position}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;font-size:.8rem">
+                        <span style="color:var(--text-muted)">Valor: ${formatMoney(p.market_value || 0)}</span>
+                        <label class="lock-toggle" style="display:flex;align-items:center;gap:.25rem;cursor:pointer">
+                            <input type="checkbox" class="blocked-checkbox" data-pid="${p.player_id}" ${blocked ? 'checked' : ''}>
+                            <span>🔒 Bloqueo</span>
+                        </label>
+                    </div>
+                    <div class="clause-presets" data-pid="${p.player_id}" style="display:flex;flex-wrap:wrap;gap:.25rem">
+                        ${CLAUSE_PRESETS.map(preset => `
+                            <button type="button" class="btn btn-sm preset-btn ${preset.v === amount ? 'btn-primary' : 'btn-outline'}"
+                                data-pid="${p.player_id}" data-value="${preset.v}"
+                                style="flex:1;min-width:48px;padding:.3rem .25rem;font-size:.75rem">
+                                ${preset.label}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>`;
+            }).join('')}
             </div>
-        `).join('');
+        `;
 
         const recalc = () => {
             let total = 0;
-            document.querySelectorAll('.clause-slider').forEach(s => {
-                total += parseInt(s.value || 0);
+            let blockedCount = 0;
+            document.querySelectorAll('.clause-card').forEach(card => {
+                total += parseInt(card.dataset.amount || '0', 10);
+                if (card.dataset.blocked === '1') blockedCount += 1;
             });
-            const blocked = document.querySelectorAll('.blocked-checkbox:checked').length;
             const totalEl = document.getElementById('clauses-total');
             const blockedEl = document.getElementById('clauses-blocked');
-            if (totalEl) totalEl.textContent = formatMoney(total);
-            if (blockedEl) blockedEl.textContent = blocked;
-            if (totalEl) totalEl.style.color = total > win.protect_budget ? 'var(--danger)' : '';
-            if (blockedEl) blockedEl.style.color = blocked > 2 ? 'var(--danger)' : '';
+            const remainingEl = document.getElementById('clauses-remaining');
+            const remaining = protectBudget - total;
+            if (totalEl) {
+                totalEl.textContent = formatMoney(total);
+                totalEl.style.color = total > protectBudget ? 'var(--danger)' : '';
+            }
+            if (blockedEl) {
+                blockedEl.textContent = blockedCount;
+                blockedEl.style.color = blockedCount > MAX_BLOCKED ? 'var(--danger)' : '';
+            }
+            if (remainingEl) {
+                remainingEl.textContent = formatMoney(Math.max(0, remaining));
+                remainingEl.style.color = remaining < 0 ? 'var(--danger)' : '';
+            }
+            // Disable unchecked lock checkboxes when limit reached
+            const limitReached = blockedCount >= MAX_BLOCKED;
+            document.querySelectorAll('.blocked-checkbox').forEach(cb => {
+                if (!cb.checked) cb.disabled = limitReached;
+                else cb.disabled = false;
+            });
         };
 
-        document.querySelectorAll('.clause-slider').forEach(slider => {
-            slider.addEventListener('input', () => {
-                const value = parseInt(slider.value);
-                document.querySelector(`.clause-value[data-pid="${slider.dataset.pid}"]`).textContent = formatMoney(value);
+        // Preset button click → set amount, update card, refresh visuals
+        form.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pid = btn.dataset.pid;
+                const value = parseInt(btn.dataset.value, 10);
+                const card = form.querySelector(`.clause-card[data-pid="${pid}"]`);
+                card.dataset.amount = String(value);
+                // Update visual: highlight only the chosen preset in this card
+                form.querySelectorAll(`.preset-btn[data-pid="${pid}"]`).forEach(b => {
+                    const isActive = parseInt(b.dataset.value, 10) === value;
+                    b.classList.toggle('btn-primary', isActive);
+                    b.classList.toggle('btn-outline', !isActive);
+                });
                 recalc();
             });
         });
-        document.querySelectorAll('.blocked-checkbox').forEach(cb => {
-            cb.addEventListener('change', recalc);
+
+        // Lock checkbox
+        form.querySelectorAll('.blocked-checkbox').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const pid = cb.dataset.pid;
+                const card = form.querySelector(`.clause-card[data-pid="${pid}"]`);
+                card.dataset.blocked = cb.checked ? '1' : '0';
+                recalc();
+            });
         });
+
         recalc();
 
         // Save button
         document.getElementById('btn-save-clauses').addEventListener('click', async () => {
-            const newClauses = team.players.map(p => ({
-                player_id: p.player_id,
-                clause_amount: parseInt(document.querySelector(`.clause-slider[data-pid="${p.player_id}"]`).value),
-                is_blocked: document.querySelector(`.blocked-checkbox[data-pid="${p.player_id}"]`).checked,
-            }));
+            const newClauses = team.players.map(p => {
+                const card = form.querySelector(`.clause-card[data-pid="${p.player_id}"]`);
+                return {
+                    player_id: p.player_id,
+                    clause_amount: parseInt(card?.dataset.amount || '0', 10),
+                    is_blocked: card?.dataset.blocked === '1',
+                };
+            });
 
             try {
                 await API.post(`/teams/${teamId}/market/${windowId}/clauses/set`, { clauses: newClauses });

@@ -47,8 +47,10 @@ async def get_team(team_id: str):
         players = await db.execute_fetchall(
             """SELECT tp.*, p.name, p.country_code, p.position, p.detailed_position,
                       p.club, p.photo, p.market_value, p.clause_value,
+                      c.flag AS country_flag,
                       COALESCE(pts.total, 0) as total_points
                FROM team_players tp JOIN players p ON tp.player_id=p.id
+               LEFT JOIN countries c ON c.code = p.country_code
                LEFT JOIN (
                    SELECT player_id, SUM(total_points) as total
                    FROM match_scores GROUP BY player_id
@@ -59,6 +61,7 @@ async def get_team(team_id: str):
         player_list = [
             TeamPlayerOut(
                 player_id=p["player_id"], name=p["name"], country_code=p["country_code"],
+                country_flag=p["country_flag"] or "",
                 position=p["position"], detailed_position=p["detailed_position"],
                 club=p["club"], photo=p["photo"], market_value=p["market_value"],
                 clause_value=p["clause_value"], is_starter=bool(p["is_starter"]),

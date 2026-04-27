@@ -98,6 +98,7 @@ class TeamPlayerOut(BaseModel):
     player_id: str
     name: str
     country_code: str
+    country_flag: str = ""
     position: str
     detailed_position: str = ""
     club: str = ""
