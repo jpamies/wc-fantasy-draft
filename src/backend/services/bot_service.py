@@ -142,7 +142,6 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
     try:
         rows = await db.execute_fetchall(
             """SELECT tp.player_id, p.position,
-                      COALESCE(p.strength, 0) AS strength,
                       COALESCE(p.market_value, 0) AS market_value
                FROM team_players tp JOIN players p ON tp.player_id = p.id
                WHERE tp.team_id=?""",
@@ -156,7 +155,7 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
         for p in players:
             by_pos.setdefault(p["position"], []).append(p)
         for arr in by_pos.values():
-            arr.sort(key=lambda x: (x["strength"], x["market_value"]), reverse=True)
+            arr.sort(key=lambda x: x["market_value"], reverse=True)
 
         chosen = None
         for f in FORMATIONS:
@@ -168,11 +167,11 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
                 break
 
         if chosen is None:
-            all_sorted = sorted(players, key=lambda x: (x["strength"], x["market_value"]), reverse=True)
+            all_sorted = sorted(players, key=lambda x: x["market_value"], reverse=True)
             chosen = all_sorted[:11]
 
         chosen_ids = {p["player_id"] for p in chosen}
-        sorted_starters = sorted(chosen, key=lambda x: (x["strength"], x["market_value"]), reverse=True)
+        sorted_starters = sorted(chosen, key=lambda x: x["market_value"], reverse=True)
         captain_id = sorted_starters[0]["player_id"] if sorted_starters else None
         vc_id = sorted_starters[1]["player_id"] if len(sorted_starters) > 1 else None
 
