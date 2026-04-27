@@ -325,15 +325,15 @@ class MarketService:
                 return {"success": False, "reason": "Seller reached maximum sells limit"}
 
             # Use transaction to ensure atomicity
-            async with db as conn:
+            try:
                 # Move player
-                await conn.execute(
+                await db.execute(
                     "UPDATE team_players SET team_id = ? WHERE player_id = ? AND team_id = ?",
                     (buyer_team_id, player_id, seller_team_id),
                 )
 
                 # Update budgets
-                await conn.execute(
+                await db.execute(
                     """UPDATE market_budgets 
                        SET spent_on_buys = spent_on_buys + ?,
                            remaining_budget = remaining_budget - ?,
@@ -343,7 +343,7 @@ class MarketService:
                     (clause_amount, clause_amount, datetime.now().isoformat(), window_id, buyer_team_id),
                 )
 
-                await conn.execute(
+                await db.execute(
                     """UPDATE market_budgets 
                        SET earned_from_sales = earned_from_sales + ?,
                            remaining_budget = remaining_budget + ?,
@@ -354,16 +354,21 @@ class MarketService:
                 )
 
                 # Record transaction
-                await conn.execute(
+                cursor = await db.execute(
                     """INSERT INTO market_transactions
                        (market_window_id, buyer_team_id, seller_team_id, player_id, clause_amount_paid, status)
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (window_id, buyer_team_id, seller_team_id, player_id, clause_amount, "completed"),
                 )
+                tx_id = cursor.lastrowid
 
-                await conn.commit()
+                await db.commit()
+            except Exception as tx_err:
+                await db.rollback()
+                logger.error(f"Transaction error: {tx_err}")
+                raise
 
-            return {"success": True, "transaction_id": f"{window_id}_{buyer_team_id}_{player_id}"}
+            return {"success": True, "transaction_id": tx_id, "clause_amount_paid": clause_amount}
         except Exception as e:
             logger.error(f"Error buying player: {e}")
             raise
@@ -567,6 +572,17 @@ class MarketService:
                 if not player:
                     return {"success": False, "reason": "Player not found"}
 
+                # Verify player is not already on a team in this league
+                window = await MarketService.get_market_window(window_id)
+                already = await db.execute_fetchall(
+                    """SELECT tp.id FROM team_players tp
+                       JOIN fantasy_teams ft ON tp.team_id = ft.id
+                       WHERE tp.player_id = ? AND ft.league_id = ?""",
+                    (player_id, window["league_id"]),
+                )
+                if already:
+                    return {"success": False, "reason": "Player already owned in this league"}
+
                 # Update pick
                 await db.execute(
                     "UPDATE reposition_draft_picks SET player_id=? WHERE market_window_id=? AND team_id=? AND pick_number=?",
@@ -582,10 +598,31 @@ class MarketService:
                     await db.execute(
                         """INSERT INTO team_players (team_id, player_id, acquired_via, acquired_at, market_window_acquired)
                            VALUES (?, ?, ?, ?, ?)""",
-                        (team_id, player_id, "reposition_draft", datetime.now().isoformat(), window_id),
+                        (team_id, player_id, "free_market", datetime.now().isoformat(), window_id),
+                    )
+
+                # If team still has <23 players, append a new pick row at end of queue
+                count_row = await db.execute_fetchall(
+                    "SELECT COUNT(*) as cnt FROM team_players WHERE team_id=?",
+                    (team_id,),
+                )
+                player_count = count_row[0]["cnt"]
+
+                if player_count < 23:
+                    # Find max pick_number to append
+                    max_row = await db.execute_fetchall(
+                        "SELECT MAX(pick_number) as mx FROM reposition_draft_picks WHERE market_window_id=?",
+                        (window_id,),
+                    )
+                    next_num = (max_row[0]["mx"] or 0) + 1
+                    await db.execute(
+                        """INSERT INTO reposition_draft_picks
+                           (market_window_id, team_id, pick_number, is_pass)
+                           VALUES (?, ?, ?, 0)""",
+                        (window_id, team_id, next_num),
                     )
             else:
-                # Pass turn
+                # Pass turn — team is out of the draft
                 await db.execute(
                     "UPDATE reposition_draft_picks SET is_pass=1 WHERE market_window_id=? AND team_id=? AND pick_number=?",
                     (window_id, team_id, pick_number),

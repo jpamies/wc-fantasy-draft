@@ -16,6 +16,39 @@ router = APIRouter(prefix="/api/v1", tags=["market"])
 logger = logging.getLogger(__name__)
 
 
+# ==================== READ-ONLY MARKET WINDOW INFO ====================
+
+@router.get("/leagues/{league_id}/market-windows")
+async def list_market_windows(
+    league_id: str,
+    current_team: dict = Depends(get_current_team),
+):
+    """List all market windows in a league."""
+    from src.backend.database import get_db
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            "SELECT * FROM market_windows WHERE league_id=? ORDER BY created_at DESC",
+            (league_id,),
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/leagues/{league_id}/market/{window_id}")
+async def get_market_window_detail(
+    league_id: str,
+    window_id: int,
+    current_team: dict = Depends(get_current_team),
+):
+    """Get details of a specific market window."""
+    window = await MarketService.get_market_window(window_id)
+    if not window or window.get("league_id") != league_id:
+        raise HTTPException(404, "Market window not found")
+    return window
+
+
 # ==================== MARKET WINDOWS (COMMISSIONER) ====================
 
 @router.post("/leagues/{league_id}/admin/market-windows")
@@ -224,8 +257,23 @@ async def get_market_budget(
     try:
         budget = await MarketService.get_market_budget(window_id, team_id)
         if not budget:
-            raise HTTPException(404, "Budget not found")
+            # Budget not yet initialized (still in clause_window phase)
+            window = await MarketService.get_market_window(window_id)
+            if not window:
+                raise HTTPException(404, "Market window not found")
+            return MarketBudgetOut(
+                initial_budget=window["initial_budget"],
+                earned_from_sales=0,
+                spent_on_buys=0,
+                remaining_budget=window["initial_budget"],
+                buys_count=0,
+                sells_count=0,
+                max_buys=window["max_buys"],
+                max_sells=window["max_sells"],
+            )
         return budget
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting budget: {e}")
         raise HTTPException(500, str(e))

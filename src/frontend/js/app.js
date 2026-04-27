@@ -44,6 +44,17 @@ window.clerkReady = (async function initClerk() {
             avatar.src = clerkUser.avatar;
             avatar.style.display = 'block';
         }
+        // Show admin link for commissioners
+        if (API.isCommissioner()) {
+            const navLinks = document.getElementById('nav-links');
+            if (navLinks && !navLinks.querySelector('[data-page="admin-market"]')) {
+                const a = document.createElement('a');
+                a.href = '#/admin/market';
+                a.dataset.page = 'admin-market';
+                a.textContent = '⚙️ Admin';
+                navLinks.appendChild(a);
+            }
+        }
     }
 
     // Logout — sign out of both Clerk and our app
