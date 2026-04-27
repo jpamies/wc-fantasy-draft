@@ -156,7 +156,7 @@ async def market_tick(
         wid = w["id"]
         s = w["status"]
         try:
-            if s == "scheduled" and (_parse_iso(w["clause_window_start"]) or far_future) <= now_dt:
+            if s == "pending" and (_parse_iso(w["clause_window_start"]) or far_future) <= now_dt:
                 await MarketService.start_clause_phase(wid); transitions += 1
                 s = "clause_window"
             if s == "clause_window" and (_parse_iso(w["clause_window_end"]) or far_future) <= now_dt:

@@ -152,8 +152,8 @@ async def _market_auto_transition_watchdog():
                 try:
                     status = window["status"]
 
-                    # scheduled → clause_window
-                    if (status == "scheduled" and
+                    # pending → clause_window
+                    if (status == "pending" and
                         window["clause_window_start"] and
                         now_dt >= (_parse_iso(window["clause_window_start"]) or now_dt)):
                         print(f"[market watchdog] transitioning window {window['id']} to clause_window")
