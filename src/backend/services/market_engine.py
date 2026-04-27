@@ -277,9 +277,11 @@ class MarketEngine:
 
             from src.backend.config import settings
             if settings.SIMULATOR_API_URL:
-                from src.backend.services.simulator_client import fetch_players
-                players = await fetch_players(limit=500)
-                return [p for p in players if p["id"] not in owned_ids][:100]
+                from src.backend.services.simulator_client import fetch_all_squad_players
+                players = await fetch_all_squad_players()
+                free = [p for p in players if p["id"] not in owned_ids]
+                free.sort(key=lambda p: p.get("market_value", 0) or 0, reverse=True)
+                return free[:100]
 
             if owned_ids:
                 placeholders = ",".join("?" for _ in owned_ids)

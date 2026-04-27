@@ -106,8 +106,8 @@ class DraftEngine:
             # Count available players
             picked_ids = [p["player_id"] for p in picks]
             if _use_simulator:
-                from src.backend.services.simulator_client import fetch_players
-                all_players = await fetch_players(limit=500)
+                from src.backend.services.simulator_client import fetch_all_squad_players
+                all_players = await fetch_all_squad_players()
                 picked_set = set(picked_ids)
                 available_count = sum(1 for p in all_players if p["id"] not in picked_set)
             elif picked_ids:
@@ -255,13 +255,16 @@ class DraftEngine:
             picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
             picked_ids = set(p["player_id"] for p in picked)
 
+            squad_pool = None
             for pos in preferences:
                 if _use_simulator:
-                    from src.backend.services.simulator_client import fetch_players
-                    candidates = await fetch_players(position=pos, limit=20)
-                    available = [p for p in candidates if p["id"] not in picked_ids]
-                    if available:
-                        return await DraftEngine.make_pick(league_id, team_id, available[0]["id"])
+                    if squad_pool is None:
+                        from src.backend.services.simulator_client import fetch_all_squad_players
+                        squad_pool = await fetch_all_squad_players()
+                    candidates = [p for p in squad_pool if p["position"] == pos and p["id"] not in picked_ids]
+                    candidates.sort(key=lambda p: p.get("market_value", 0) or 0, reverse=True)
+                    if candidates:
+                        return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
                 else:
                     if picked_ids:
                         placeholders = ",".join("?" for _ in picked_ids)
@@ -443,13 +446,17 @@ class DraftEngine:
                 priority_positions.append("GK")
 
             # Try to pick from each priority position
+            squad_pool = None
+            picked_set = set(picked_ids)
             for pos in priority_positions:
                 if _use_simulator:
-                    from src.backend.services.simulator_client import fetch_players
-                    candidates = await fetch_players(position=pos, limit=20)
-                    available = [p for p in candidates if p["id"] not in picked_ids]
-                    if available:
-                        return await DraftEngine.make_pick(league_id, team_id, available[0]["id"])
+                    if squad_pool is None:
+                        from src.backend.services.simulator_client import fetch_all_squad_players
+                        squad_pool = await fetch_all_squad_players()
+                    candidates = [p for p in squad_pool if p["position"] == pos and p["id"] not in picked_set]
+                    candidates.sort(key=lambda p: p.get("market_value", 0) or 0, reverse=True)
+                    if candidates:
+                        return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
                 else:
                     if picked_ids:
                         placeholders = ",".join("?" for _ in picked_ids)

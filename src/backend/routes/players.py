@@ -18,11 +18,21 @@ async def list_players(
     offset: int = 0,
 ):
     if _use_simulator:
-        from src.backend.services.simulator_client import fetch_players
-        rows = await fetch_players(
-            country=country, position=position, search=search,
-            sort=sort, limit=limit, offset=offset,
-        )
+        from src.backend.services.simulator_client import fetch_all_squad_players
+        all_players = await fetch_all_squad_players()
+        rows = all_players
+        if country:
+            rows = [p for p in rows if p.get("country_code") == country]
+        if position:
+            rows = [p for p in rows if p.get("position") == position]
+        if search:
+            term = search.lower()
+            rows = [p for p in rows if term in (p.get("name") or "").lower()]
+        sort_key = sort if sort in {"market_value", "name", "age", "clause_value", "position"} else "market_value"
+        reverse = order.lower() != "asc"
+        _default = "" if sort_key in {"name", "position"} else 0
+        rows.sort(key=lambda p: p.get(sort_key) if p.get(sort_key) is not None else _default, reverse=reverse)
+        rows = rows[offset: offset + limit]
         return [PlayerOut(**r) for r in rows]
 
     from src.backend.database import get_db
