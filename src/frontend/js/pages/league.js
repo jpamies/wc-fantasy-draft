@@ -41,7 +41,7 @@ async function renderLeaguePage(container) {
                 <tbody>
                     ${league.teams.map(t => `
                         <tr class="${t.id === API.getTeamId() ? 'rank-1' : ''}">
-                            <td>${t.team_name} ${t.id === league.commissioner_team_id ? '👑' : ''}</td>
+                            <td>${t.team_name} ${t.id === league.commissioner_team_id ? '👑' : ''} ${t.owner_nick?.startsWith('bot_') ? '🤖' : ''}</td>
                             <td>${t.display_name || t.owner_nick}</td>
                             <td class="money">${formatMoney(t.budget)}</td>
                         </tr>
@@ -53,7 +53,7 @@ async function renderLeaguePage(container) {
         ${isComm ? `
         <div class="card">
             <div class="card-header">Panel del Comisionado</div>
-            <div class="flex flex-wrap">
+            <div class="flex flex-wrap" style="gap:.5rem;align-items:center">
                 ${league.status === 'setup' || league.status === 'draft_pending' ? `
                     <button class="btn btn-gold" id="btn-start-draft" ${league.teams.length < 2 ? 'disabled title="Mínimo 2 equipos"' : ''}>
                         🎯 Iniciar Draft
@@ -64,9 +64,35 @@ async function renderLeaguePage(container) {
                         ${league.transfer_window_open ? '🔒 Cerrar Mercado' : '🔓 Abrir Mercado'}
                     </button>
                 ` : ''}
-                <button class="btn" id="btn-delete-league" style="background:var(--accent-red,#e74c3c);color:#fff;margin-left:auto">
-                    🗑️ Eliminar Liga
+                <button class="btn btn-outline" id="btn-config" style="font-size:.85rem">⚙️ Configuración</button>
+                <button class="btn" id="btn-delete-league" style="background:var(--accent-red,#e74c3c);color:#fff;margin-left:auto;font-size:.85rem">
+                    🗑️ Eliminar
                 </button>
+            </div>
+        </div>
+
+        <div class="card mt-1" id="config-panel" style="display:none">
+            <div class="card-header">⚙️ Configuración de desarrollo</div>
+            
+            ${league.status === 'setup' || league.status === 'draft_pending' ? `
+            <div style="margin-bottom:1rem">
+                <div style="font-weight:600;margin-bottom:.5rem">🤖 Bots</div>
+                <div class="flex" style="gap:.5rem;align-items:center">
+                    <label style="font-size:.85rem">Añadir</label>
+                    <input type="number" id="bot-count" min="1" max="10" value="3" style="width:60px">
+                    <button class="btn btn-sm btn-primary" id="btn-add-bots">➕ Añadir bots</button>
+                    <button class="btn btn-sm" id="btn-remove-bots" style="background:var(--accent-red);color:#fff;font-size:.8rem">🗑️ Quitar bots</button>
+                </div>
+                <div style="font-size:.75rem;color:var(--text-muted);margin-top:.3rem">Los bots tienen autodraft activado. Se eliminan al resetear la liga.</div>
+            </div>
+            ` : ''}
+
+            <div>
+                <div style="font-weight:600;margin-bottom:.5rem">🔄 Resetear Liga</div>
+                <div style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.5rem">
+                    Vuelve al estado inicial: elimina draft, jugadores, alineaciones, puntuaciones y bots. Los usuarios se mantienen.
+                </div>
+                <button class="btn btn-sm" id="btn-reset-league" style="background:var(--accent-red);color:#fff">↺ Resetear Liga</button>
             </div>
         </div>
         ` : `
@@ -125,6 +151,37 @@ async function renderLeaguePage(container) {
             document.getElementById('main-nav').classList.add('hidden');
             showToast('Has salido de la liga', 'success');
             Router.navigate('#/');
+        } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    document.getElementById('btn-config')?.addEventListener('click', () => {
+        const panel = document.getElementById('config-panel');
+        if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-add-bots')?.addEventListener('click', async () => {
+        const count = parseInt(document.getElementById('bot-count')?.value || '3');
+        try {
+            const res = await API.post(`/leagues/${leagueId}/admin/add-bots`, { count });
+            showToast(`${res.bots_created} bots añadidos`, 'success');
+            renderLeaguePage(container);
+        } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    document.getElementById('btn-remove-bots')?.addEventListener('click', async () => {
+        try {
+            const res = await API.delete(`/leagues/${leagueId}/admin/bots`);
+            showToast(`${res.bots_removed} bots eliminados`, 'success');
+            renderLeaguePage(container);
+        } catch (err) { showToast(err.message, 'error'); }
+    });
+
+    document.getElementById('btn-reset-league')?.addEventListener('click', async () => {
+        if (!confirm('⚠️ ¿Resetear la liga? Se borrarán draft, jugadores, alineaciones, puntuaciones y bots. Los usuarios se mantienen.')) return;
+        try {
+            await API.post(`/leagues/${leagueId}/admin/reset`);
+            showToast('Liga reseteada', 'success');
+            renderLeaguePage(container);
         } catch (err) { showToast(err.message, 'error'); }
     });
 

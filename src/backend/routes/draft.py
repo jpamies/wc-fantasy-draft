@@ -29,8 +29,17 @@ async def start_draft(league_id: str, auth: dict = Depends(get_current_team)):
     result = await DraftEngine.start_draft(league_id)
     if "error" in result:
         raise HTTPException(400, result["error"])
+    
+    # Enable autodraft for all bots
+    from src.backend.services.bot_service import enable_autodraft_for_bots
+    await enable_autodraft_for_bots(league_id)
+    
     state = await DraftEngine.get_draft_state(league_id)
     await _broadcast(league_id, {"type": "draft_started", "state": state})
+    
+    # Process autodraft immediately (bots will pick if it's their turn)
+    await _process_and_broadcast_autodraft(league_id)
+    
     return result
 
 

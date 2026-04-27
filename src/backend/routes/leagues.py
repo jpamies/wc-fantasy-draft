@@ -356,3 +356,103 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         return {"ok": True}
     finally:
         await db.close()
+
+
+# --- Bots ---
+
+@router.post("/leagues/{league_id}/admin/add-bots")
+async def admin_add_bots(league_id: str, body: dict, auth: dict = Depends(get_current_team)):
+    """Add bot teams. Body: {"count": 3}"""
+    if auth["league_id"] != league_id or not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    count = body.get("count", 0)
+    if not isinstance(count, int) or count < 0 or count > 10:
+        raise HTTPException(400, "count must be 0-10")
+
+    db = await get_db()
+    try:
+        league = await db.execute_fetchall("SELECT status FROM leagues WHERE id=?", (league_id,))
+        if not league:
+            raise HTTPException(404, "League not found")
+        if dict(league[0])["status"] not in ("setup", "draft_pending"):
+            raise HTTPException(409, "Solo se pueden añadir bots antes del draft")
+    finally:
+        await db.close()
+
+    from src.backend.services.bot_service import create_bots
+    created = await create_bots(league_id, count)
+    return {"ok": True, "bots_created": len(created), "bots": created}
+
+
+@router.delete("/leagues/{league_id}/admin/bots")
+async def admin_remove_bots(league_id: str, auth: dict = Depends(get_current_team)):
+    """Remove all bots from the league."""
+    if auth["league_id"] != league_id or not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from src.backend.services.bot_service import remove_bots
+    removed = await remove_bots(league_id)
+    return {"ok": True, "bots_removed": removed}
+
+
+@router.post("/leagues/{league_id}/admin/reset")
+async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_team)):
+    """Reset league to setup state. Keeps human teams, removes bots, clears all game data."""
+    if auth["league_id"] != league_id or not auth.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from src.backend.services.bot_service import remove_bots
+    db = await get_db()
+    try:
+        league = await db.execute_fetchall("SELECT * FROM leagues WHERE id=?", (league_id,))
+        if not league:
+            raise HTTPException(404, "League not found")
+        league = dict(league[0])
+
+        # 1. Delete drafts and related data
+        draft_rows = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+        for d in draft_rows:
+            await db.execute("DELETE FROM draft_settings WHERE draft_id=?", (dict(d)["id"],))
+            await db.execute("DELETE FROM draft_picks WHERE draft_id=?", (dict(d)["id"],))
+        await db.execute("DELETE FROM drafts WHERE league_id=?", (league_id,))
+
+        # 2. Clear all team players and lineups for this league
+        await db.execute(
+            "DELETE FROM matchday_lineups WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
+            (league_id,),
+        )
+        await db.execute(
+            "DELETE FROM team_players WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
+            (league_id,),
+        )
+
+        # 3. Clear transfers
+        await db.execute("DELETE FROM transfers WHERE league_id=?", (league_id,))
+
+        # 4. Reset budgets for remaining human teams
+        await db.execute(
+            "UPDATE fantasy_teams SET budget=? WHERE league_id=? AND owner_nick NOT LIKE 'bot_%'",
+            (league["initial_budget"], league_id),
+        )
+
+        # 5. Remove all bots
+        bot_ids = await db.execute_fetchall(
+            "SELECT id FROM fantasy_teams WHERE league_id=? AND owner_nick LIKE 'bot_%'",
+            (league_id,),
+        )
+        if bot_ids:
+            placeholders = ",".join("?" * len(bot_ids))
+            ids = [b["id"] for b in bot_ids]
+            await db.execute(f"DELETE FROM fantasy_teams WHERE id IN ({placeholders})", ids)
+
+        # 6. Reset league status
+        await db.execute(
+            "UPDATE leagues SET status='setup', transfer_window_open=0 WHERE id=?",
+            (league_id,),
+        )
+
+        await db.commit()
+        return {"ok": True, "message": "Liga reseteada a estado inicial"}
+    finally:
+        await db.close()
