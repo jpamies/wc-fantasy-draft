@@ -112,6 +112,20 @@ Router.register('#/team', async (container) => {
             return getPositionCounts().GK >= 1;
         }
 
+        const POS_LABELS_FULL = {GK: 'porteros', DEF: 'defensas', MID: 'centrocampistas', FWD: 'delanteros'};
+        function validateFormation() {
+            const c = getPositionCounts();
+            for (const pos of ['GK', 'DEF', 'MID', 'FWD']) {
+                if (c[pos] < POS_LIMITS[pos].min) {
+                    return { ok: false, message: `Mínimo ${POS_LIMITS[pos].min} ${POS_LABELS_FULL[pos]} (tienes ${c[pos]})` };
+                }
+                if (c[pos] > POS_LIMITS[pos].max) {
+                    return { ok: false, message: `Máximo ${POS_LIMITS[pos].max} ${POS_LABELS_FULL[pos]} (tienes ${c[pos]})` };
+                }
+            }
+            return { ok: true };
+        }
+
         function autoLineup() {
             // Pick best 11: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD
             // Sort by avg_points DESC, then market_value DESC as tiebreaker
@@ -240,6 +254,7 @@ Router.register('#/team', async (container) => {
 
                 ${starterIds.size > 0 && !validateGK() ? '<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ Necesitas al menos 1 portero (GK) titular</div>' : ''}
                 ${!isCompleted && starterIds.size !== 11 ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ La alineación debe tener exactamente 11 titulares (tienes ${starterIds.size})</div>` : ''}
+                ${!isCompleted && starterIds.size === 11 && !validateFormation().ok ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ ${validateFormation().message}</div>` : ''}
 
                 <div class="grid grid-2">
                     <div class="card">
@@ -335,6 +350,11 @@ Router.register('#/team', async (container) => {
                 }
                 if (!validateGK()) {
                     showToast('⚠️ Necesitas al menos 1 portero (GK) titular', 'error');
+                    return;
+                }
+                const formationCheck = validateFormation();
+                if (!formationCheck.ok) {
+                    showToast(`⚠️ ${formationCheck.message}`, 'error');
                     return;
                 }
                 const payload = { starters: [...starterIds] };

@@ -289,6 +289,26 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
             if len(body.starters) != 11:
                 raise HTTPException(400, "La alineación debe tener exactamente 11 titulares")
 
+            # Validate formation limits (1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD)
+            placeholders = ",".join("?" for _ in body.starters)
+            pos_rows = await db.execute_fetchall(
+                f"SELECT position FROM players WHERE id IN ({placeholders})",
+                list(body.starters),
+            )
+            pos_counts = {"GK": 0, "DEF": 0, "MID": 0, "FWD": 0}
+            for r in pos_rows:
+                pos = dict(r)["position"]
+                if pos in pos_counts:
+                    pos_counts[pos] += 1
+            POS_LIMITS = {"GK": (1, 1), "DEF": (3, 5), "MID": (2, 5), "FWD": (1, 3)}
+            POS_LABELS = {"GK": "porteros", "DEF": "defensas", "MID": "centrocampistas", "FWD": "delanteros"}
+            for pos, (mn, mx) in POS_LIMITS.items():
+                c = pos_counts[pos]
+                if c < mn:
+                    raise HTTPException(400, f"Mínimo {mn} {POS_LABELS[pos]} (tienes {c})")
+                if c > mx:
+                    raise HTTPException(400, f"Máximo {mx} {POS_LABELS[pos]} (tienes {c})")
+
             # Validate: can't ADD a locked player as starter (their match started)
             current_starters = await db.execute_fetchall(
                 "SELECT ml.player_id FROM matchday_lineups ml WHERE ml.team_id=? AND ml.matchday_id=? AND ml.is_starter=1",
