@@ -269,9 +269,11 @@ CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(t
 
 async def get_db() -> aiosqlite.Connection:
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-    db = await aiosqlite.connect(DB_PATH)
+    db = await aiosqlite.connect(DB_PATH, timeout=30.0)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA busy_timeout=10000")
+    await db.execute("PRAGMA synchronous=NORMAL")
     await db.execute("PRAGMA foreign_keys=ON")
     return db
 
