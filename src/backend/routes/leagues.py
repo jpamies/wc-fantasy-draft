@@ -473,7 +473,7 @@ async def admin_reset_simulator(league_id: str, auth: dict = Depends(get_current
     from src.backend.services.simulator_client import get_client
     client = get_client()
     try:
-        resp = await client.post("/api/v1/simulation/reset", timeout=30.0)
+        resp = await client.post("/api/v1/simulate/reset", timeout=30.0)
         resp.raise_for_status()
     except Exception as e:
         raise HTTPException(502, f"Simulator reset failed: {e}")
