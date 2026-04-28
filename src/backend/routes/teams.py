@@ -100,7 +100,7 @@ async def update_lineup(team_id: str, body: LineupUpdate, auth: dict = Depends(g
 
             # Verify all players belong to team
             if body.starters:
-                placeholders = ",".join("?" for _ in body.starters)
+                placeholders = ",".join(f"${i+2}" for i in range(len(body.starters)))
                 starter_rows = await db.execute_fetchall(
                     f"""SELECT tp.player_id, p.position FROM team_players tp
                         JOIN players p ON tp.player_id=p.id
@@ -293,7 +293,7 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
                 raise HTTPException(400, "La alineación debe tener exactamente 11 titulares")
 
             # Validate formation limits (1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD)
-            placeholders = ",".join("?" for _ in body.starters)
+            placeholders = ",".join(f"${i+1}" for i in range(len(body.starters)))
             pos_rows = await db.execute_fetchall(
                 f"SELECT position FROM players WHERE id IN ({placeholders})",
                 list(body.starters),

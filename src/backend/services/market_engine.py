@@ -284,7 +284,7 @@ class MarketEngine:
                 return free[:100]
 
             if owned_ids:
-                placeholders = ",".join("?" for _ in owned_ids)
+                placeholders = ",".join(f"${i+1}" for i in range(len(owned_ids)))
                 rows = await db.execute_fetchall(
                     f"SELECT * FROM players WHERE id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 100",
                     list(owned_ids),

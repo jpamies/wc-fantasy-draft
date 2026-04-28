@@ -122,7 +122,7 @@ async def get_lineup_status(team_id: str, matchday_id: str) -> dict:
         player_ids = [p["player_id"] for p in lineup]
         scores = {}
         if player_ids:
-            placeholders = ",".join("?" * len(player_ids))
+            placeholders = ",".join(f"${i+2}" for i in range(len(player_ids)))
             score_rows = await db.execute_fetchall(
                 f"SELECT player_id, total_points, minutes_played FROM match_scores WHERE matchday_id=$1 AND player_id IN ({placeholders})",
                 (matchday_id, *player_ids),

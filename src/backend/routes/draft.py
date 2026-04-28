@@ -1,4 +1,5 @@
 import json
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from src.backend.auth import get_current_team
 from src.backend.services.draft_engine import DraftEngine
@@ -8,6 +9,24 @@ router = APIRouter(prefix="/api/v1", tags=["draft"])
 
 # Active WebSocket connections per league
 _draft_connections: dict[str, list[WebSocket]] = {}
+
+# Per-league lock to prevent multiple concurrent autodraft cascades from
+# stepping on each other (e.g. WS connect + REST trigger + watchdog).
+_autodraft_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_autodraft_lock(league_id: str) -> asyncio.Lock:
+    lock = _autodraft_locks.get(league_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _autodraft_locks[league_id] = lock
+    return lock
+
+
+def _schedule_autodraft(league_id: str):
+    """Fire-and-forget the autodraft cascade. The HTTP response can return
+    immediately; bots will pick over time with delays for UX."""
+    asyncio.create_task(_process_and_broadcast_autodraft(league_id))
 
 
 async def _broadcast(league_id: str, message: dict):
@@ -38,7 +57,7 @@ async def start_draft(league_id: str, auth: dict = Depends(get_current_team)):
     await _broadcast(league_id, {"type": "draft_started", "state": state})
     
     # Process autodraft immediately (bots will pick if it's their turn)
-    await _process_and_broadcast_autodraft(league_id)
+    _schedule_autodraft(league_id)
     
     return result
 
@@ -73,7 +92,7 @@ async def make_pick(league_id: str, body: DraftPickRequest, auth: dict = Depends
     })
 
     # Process any autodraft teams that are next in line
-    await _process_and_broadcast_autodraft(league_id)
+    _schedule_autodraft(league_id)
 
     return result
 
@@ -89,7 +108,7 @@ async def auto_pick(league_id: str, auth: dict = Depends(get_current_team)):
     await _broadcast(league_id, {"type": "pick", "pick": result, "state": state})
 
     # Process any autodraft teams that are next in line
-    await _process_and_broadcast_autodraft(league_id)
+    _schedule_autodraft(league_id)
 
     return result
 
@@ -106,9 +125,12 @@ async def toggle_autodraft(league_id: str, auth: dict = Depends(get_current_team
     await DraftEngine.set_autodraft(league_id, team_id, not currently_enabled)
     new_state = not currently_enabled
 
-    # If just enabled and it's currently this team's turn, trigger immediately
+    # Fire-and-forget so the HTTP response returns immediately and the UI can
+    # update the button. The cascade (specially with all-bot leagues) can take
+    # many seconds and would otherwise block the response.
     if new_state:
-        await _process_and_broadcast_autodraft(league_id)
+        import asyncio
+        asyncio.create_task(_process_and_broadcast_autodraft(league_id))
 
     return {"ok": True, "autodraft": new_state, "team_id": team_id}
 
@@ -164,7 +186,7 @@ async def get_queue(league_id: str, auth: dict = Depends(get_current_team)):
     from src.backend.database import get_db
     db = await get_db()
     try:
-        placeholders = ",".join("?" for _ in queue_ids)
+        placeholders = ",".join(f"${i+1}" for i in range(len(queue_ids)))
         rows = await db.execute_fetchall(
             f"SELECT * FROM players WHERE id IN ({placeholders})", queue_ids
         )
@@ -192,7 +214,7 @@ async def add_to_queue(league_id: str, body: DraftPickRequest, auth: dict = Depe
         raise HTTPException(403, "Not in this league")
     await DraftEngine.add_to_queue(league_id, auth["team_id"], body.player_id)
     # If it's my turn and I have a queue, process
-    await _process_and_broadcast_autodraft(league_id)
+    _schedule_autodraft(league_id)
     return {"ok": True, "queue": await DraftEngine.get_queue(league_id, auth["team_id"])}
 
 
@@ -222,19 +244,29 @@ async def clear_queue(league_id: str, auth: dict = Depends(get_current_team)):
 
 
 async def _process_and_broadcast_autodraft(league_id: str):
-    """Process autodraft picks and broadcast each one."""
-    import asyncio
-    auto_results = await DraftEngine.process_autodraft(league_id)
-    for pick in auto_results:
-        state = await DraftEngine.get_draft_state(league_id)
-        await _broadcast(league_id, {
-            "type": "pick" if state and state["status"] == "in_progress" else "draft_end",
-            "pick": pick,
-            "state": state,
-            "autodraft": True,
-        })
-        # Delay between autodraft picks so clients can follow progress
-        await asyncio.sleep(1.0)
+    """Process autodraft picks and broadcast each one. Serialized per league
+    via a lock to prevent concurrent cascades stepping on each other."""
+    lock = _get_autodraft_lock(league_id)
+    if lock.locked():
+        # Another cascade is already running for this league; it will pick up
+        # any newly-enabled autodraft team on its next iteration.
+        return
+    async with lock:
+        while True:
+            auto_results = await DraftEngine.process_autodraft(league_id)
+            if not auto_results:
+                break
+            for pick in auto_results:
+                state = await DraftEngine.get_draft_state(league_id)
+                await _broadcast(league_id, {
+                    "type": "pick" if state and state["status"] == "in_progress" else "draft_end",
+                    "pick": pick,
+                    "state": state,
+                    "autodraft": True,
+                })
+                # Realistic delay between bot picks (also keeps the event loop
+                # responsive for HTTP/WebSocket traffic).
+                await asyncio.sleep(1.0)
 
 
 @router.websocket("/leagues/{league_id}/draft/ws")
@@ -258,7 +290,6 @@ async def draft_websocket(websocket: WebSocket, league_id: str):
                 has_auto = await DraftEngine.is_autodraft(league_id, current_team)
                 has_queue = await DraftEngine.has_queue(league_id, current_team)
                 if has_auto or has_queue:
-                    import asyncio
                     asyncio.create_task(_process_and_broadcast_autodraft(league_id))
 
         while True:

@@ -458,7 +458,7 @@ async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_te
             (league_id,),
         )
         if bot_ids:
-            placeholders = ",".join("?" * len(bot_ids))
+            placeholders = ",".join(f"${i+1}" for i in range(len(bot_ids)))
             ids = [b["id"] for b in bot_ids]
             await db.execute(f"DELETE FROM fantasy_teams WHERE id IN ({placeholders})", ids)
 

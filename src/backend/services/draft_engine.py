@@ -112,7 +112,7 @@ class DraftEngine:
                 picked_set = set(picked_ids)
                 available_count = sum(1 for p in all_players if p["id"] not in picked_set)
             elif picked_ids:
-                placeholders = ",".join("?" for _ in picked_ids)
+                placeholders = ",".join(f"${i+1}" for i in range(len(picked_ids)))
                 avail = await db.execute_fetchall(
                     f"SELECT COUNT(*) as cnt FROM players WHERE id NOT IN ({placeholders})", picked_ids
                 )
@@ -275,7 +275,7 @@ class DraftEngine:
                         return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
                 else:
                     if picked_ids:
-                        placeholders = ",".join("?" for _ in picked_ids)
+                        placeholders = ",".join(f"${i+2}" for i in range(len(picked_ids)))
                         candidates = await db.execute_fetchall(
                             f"SELECT id FROM players WHERE position=$1 AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
                             [pos] + list(picked_ids),
@@ -468,7 +468,7 @@ class DraftEngine:
                         return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
                 else:
                     if picked_ids:
-                        placeholders = ",".join("?" for _ in picked_ids)
+                        placeholders = ",".join(f"${i+2}" for i in range(len(picked_ids)))
                         candidates = await db.execute_fetchall(
                             f"SELECT id FROM players WHERE position=$1 AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
                             [pos] + picked_ids,
@@ -485,11 +485,11 @@ class DraftEngine:
             await db.close()
 
     @staticmethod
-    async def process_autodraft(league_id: str) -> list[dict]:
+    async def process_autodraft(league_id: str, max_iterations: int = 1) -> list[dict]:
         """After a pick, check if the next team(s) have autodraft OR queue enabled and pick for them.
-        Returns list of auto-picks made (for broadcasting)."""
+        Returns list of auto-picks made (for broadcasting). Defaults to 1 pick per
+        call so the caller can interleave delays/broadcasts between picks."""
         results = []
-        max_iterations = 100  # safety limit
 
         for _ in range(max_iterations):
             state = await DraftEngine.get_draft_state(league_id)

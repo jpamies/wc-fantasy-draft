@@ -177,7 +177,7 @@ class ScoringEngine:
             player_ids = [r["player_id"] for r in roster]
             if not player_ids:
                 return 0
-            placeholders = ",".join("?" * len(player_ids))
+            placeholders = ",".join(f"${i+2}" for i in range(len(player_ids)))
             scores = await db.execute_fetchall(
                 f"SELECT player_id, total_points, minutes_played FROM match_scores WHERE matchday_id=$1 AND player_id IN ({placeholders})",
                 (matchday_id, *player_ids),
