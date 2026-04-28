@@ -51,12 +51,7 @@ async def get_team(team_id: str):
             """SELECT tp.*, p.name, p.country_code, p.position, p.detailed_position,
                       p.club, p.photo, p.market_value, p.clause_value,
                       c.flag AS country_flag,
-                      COALESCE(pts.total, 0) as total_points,
-                      EXISTS (
-                          SELECT 1 FROM matches m
-                          WHERE (m.home_country = p.country_code OR m.away_country = p.country_code)
-                            AND m.status <> 'finished'
-                      ) AS is_alive
+                      COALESCE(pts.total, 0) as total_points
                FROM team_players tp JOIN players p ON tp.player_id=p.id
                LEFT JOIN countries c ON c.code = p.country_code
                LEFT JOIN (
@@ -66,6 +61,9 @@ async def get_team(team_id: str):
                WHERE tp.team_id=$1 ORDER BY tp.is_starter DESC, tp.bench_order ASC""",
             (team_id,),
         )
+        # Compute alive set once for is_alive flag.
+        from src.backend.services.market_service import get_alive_country_codes
+        alive_codes = await get_alive_country_codes()
         player_list = [
             TeamPlayerOut(
                 player_id=p["player_id"], name=p["name"], country_code=p["country_code"],
@@ -77,7 +75,7 @@ async def get_team(team_id: str):
                 is_vice_captain=bool(p["is_vice_captain"]),
                 bench_order=p["bench_order"], acquired_via=p["acquired_via"],
                 total_points=p["total_points"],
-                is_alive=bool(p["is_alive"]),
+                is_alive=(alive_codes is None) or (p["country_code"] in alive_codes),
             ).model_dump()
             for p in players
         ]

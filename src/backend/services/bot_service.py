@@ -351,12 +351,12 @@ async def set_bot_clauses_for_window(window_id: int) -> int:
 async def _set_clauses_for_one_bot(team_id: str, window_id: int, protect_budget: int):
     """Compute and persist clauses for a single bot team."""
     from src.backend.database import get_db
-    from src.backend.services.market_service import MarketService
+    from src.backend.services.market_service import MarketService, get_alive_country_codes
 
+    alive_codes = await get_alive_country_codes()
     db = await get_db()
     try:
-        # Roster + total points + alive flag.
-        # alive = exists at least one non-finished match for the player's country.
+        # Roster + total points (alive flag computed in Python from alive_codes).
         roster = await db.execute_fetchall(
             """
             SELECT tp.player_id,
@@ -364,12 +364,7 @@ async def _set_clauses_for_one_bot(team_id: str, window_id: int, protect_budget:
                    p.country_code,
                    COALESCE(p.market_value, 0) AS market_value,
                    COALESCE((SELECT SUM(ms.points) FROM match_scores ms
-                             WHERE ms.player_id = tp.player_id), 0) AS total_points,
-                   EXISTS (
-                       SELECT 1 FROM matches m
-                       WHERE (m.home_country = p.country_code OR m.away_country = p.country_code)
-                         AND m.status <> 'finished'
-                   ) AS alive
+                             WHERE ms.player_id = tp.player_id), 0) AS total_points
             FROM team_players tp
             JOIN players p ON tp.player_id = p.id
             WHERE tp.team_id = $1
@@ -384,6 +379,7 @@ async def _set_clauses_for_one_bot(team_id: str, window_id: int, protect_budget:
 
     players = [dict(r) for r in roster]
     for p in players:
+        p["alive"] = (alive_codes is None) or (p["country_code"] in alive_codes)
         # Priority: heavy weight on accumulated points, market_value as tiebreak.
         # Eliminated players are pushed to bottom (negative priority).
         if p["alive"]:

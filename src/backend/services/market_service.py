@@ -8,6 +8,32 @@ from src.backend.database import get_db
 logger = logging.getLogger(__name__)
 
 
+async def get_alive_country_codes() -> Optional[set]:
+    """Return the set of country codes still in the tournament.
+
+    A country is "alive" if it has played as many finished matches as the
+    country with the most. Returns ``None`` if the tournament hasn't started
+    yet (matches table empty), meaning every country should be considered
+    alive by callers.
+    """
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            """SELECT country, COUNT(*) AS cnt FROM (
+                   SELECT home_country AS country FROM matches WHERE status='finished'
+                   UNION ALL
+                   SELECT away_country AS country FROM matches WHERE status='finished'
+               ) sub
+               GROUP BY country"""
+        )
+    finally:
+        await db.close()
+    if not rows:
+        return None
+    max_cnt = max(r["cnt"] for r in rows)
+    return {r["country"] for r in rows if r["cnt"] == max_cnt}
+
+
 class MarketService:
     """Service for managing market windows and related operations."""
 
@@ -706,11 +732,31 @@ class MarketService:
 
         Returns players that:
           - are not currently in any team of this league, AND
-          - belong to a country that is still in the tournament (has at
-            least one match with status <> 'finished').
+          - belong to a country that is still in the tournament.
+
+        "Alive" definition: the country has played as many matches as the
+        country that has played the most. If no matches exist yet, the
+        tournament hasn't started so every country is considered alive.
         """
         db = await get_db()
         try:
+            # Compute alive country set in Python — much simpler than nested SQL.
+            counts_rows = await db.execute_fetchall(
+                """SELECT country, COUNT(*) as cnt FROM (
+                       SELECT home_country AS country FROM matches WHERE status='finished'
+                       UNION ALL
+                       SELECT away_country AS country FROM matches WHERE status='finished'
+                   ) sub
+                   GROUP BY country"""
+            )
+
+            if counts_rows:
+                max_cnt = max(r["cnt"] for r in counts_rows)
+                alive_codes = {r["country"] for r in counts_rows if r["cnt"] == max_cnt}
+            else:
+                alive_codes = None  # tournament not started → no filter
+
+            # Fetch players not owned in this league.
             players = await db.execute_fetchall(
                 """SELECT p.id, p.name, p.position, p.country_code, p.photo, p.market_value
                    FROM players p
@@ -720,15 +766,14 @@ class MarketService:
                            SELECT id FROM fantasy_teams WHERE league_id = $1
                        )
                    )
-                   AND EXISTS (
-                       SELECT 1 FROM matches m
-                       WHERE (m.home_country = p.country_code OR m.away_country = p.country_code)
-                         AND m.status <> 'finished'
-                   )
                    ORDER BY p.market_value DESC""",
                 (league_id,),
             )
-            return [dict(p) for p in players]
+
+            result = [dict(p) for p in players]
+            if alive_codes is not None:
+                result = [p for p in result if p["country_code"] in alive_codes]
+            return result
         except Exception as e:
             logger.error(f"Error getting available reposition players: {e}")
             raise
