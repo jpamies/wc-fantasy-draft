@@ -99,6 +99,54 @@ class MarketService:
             logger.error(f"Error updating market window: {e}")
             raise
 
+    # Phases of the FIFA WC 2026 that get a market window between them.
+    # Order matters: each window is created for the phase named here AFTER the
+    # previous phase's matchdays have all finished.
+    AUTO_MARKET_PHASES = ["r32", "r16", "quarter", "semi", "final"]
+
+    @staticmethod
+    async def ensure_league_market_windows(league_id: str) -> int:
+        """Pre-create the 5 phase market windows for a league in `pending`
+        state with NULL dates. Auto-creator will fill in the dates when each
+        previous phase completes. Idempotent — skips phases that already exist.
+
+        Returns the number of windows created.
+        """
+        db = await get_db()
+        try:
+            existing = await db.execute_fetchall(
+                "SELECT phase FROM market_windows WHERE league_id=$1",
+                (league_id,),
+            )
+            existing_phases = {r["phase"] for r in existing}
+
+            now = datetime.now().isoformat()
+            created = 0
+            for phase in MarketService.AUTO_MARKET_PHASES:
+                if phase in existing_phases:
+                    continue
+                await db.execute(
+                    """INSERT INTO market_windows
+                       (league_id, phase, market_type, status,
+                        clause_window_start, clause_window_end,
+                        market_window_start, market_window_end,
+                        reposition_draft_start, reposition_draft_end,
+                        max_buys, max_sells, initial_budget, protect_budget,
+                        auto_generated, created_at, updated_at)
+                       VALUES ($1, $2, $3, 'pending',
+                               NULL, NULL, NULL, NULL, NULL, NULL,
+                               $4, $5, $6, $7, 1, $8, $8)""",
+                    (league_id, phase, "auto", 3, 3, 100000000, 300000000, now),
+                )
+                created += 1
+            if created:
+                await db.commit()
+                logger.info(f"Pre-created {created} market windows for league {league_id}")
+            return created
+        except Exception as e:
+            logger.error(f"Error ensuring market windows for league {league_id}: {e}")
+            raise
+
     @staticmethod
     async def start_clause_phase(window_id: int) -> Dict[str, Any]:
         """Transition market window to clause_window phase."""

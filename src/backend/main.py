@@ -249,6 +249,15 @@ async def _auto_market_window_creator():
             finally:
                 await db.close()
 
+            # Backfill: ensure every active league has the 5 pre-created
+            # pending windows (handles leagues that became active before
+            # this feature was added).
+            for lg in leagues_rows:
+                try:
+                    await MarketService.ensure_league_market_windows(lg["id"])
+                except Exception as e:
+                    print(f"[auto-market] backfill error league={lg['id']}: {e}")
+
             phase_totals: dict[str, int] = {}
             phase_finished: dict[str, int] = {}
             for r in md_rows:
@@ -271,13 +280,11 @@ async def _auto_market_window_creator():
                     db = await get_db()
                     try:
                         existing = await db.execute_fetchall(
-                            "SELECT id FROM market_windows WHERE league_id=$1 AND phase=$2",
+                            "SELECT id, status, clause_window_start FROM market_windows WHERE league_id=$1 AND phase=$2",
                             (league_id, tgt_phase),
                         )
                     finally:
                         await db.close()
-                    if existing:
-                        continue
 
                     now_dt = datetime.now(timezone.utc)
                     clause_start = now_dt
@@ -286,6 +293,32 @@ async def _auto_market_window_creator():
                     market_end = market_start + timedelta(days=1)
                     repo_start = market_end
                     repo_end = repo_start + timedelta(days=1)
+
+                    if existing:
+                        win = existing[0]
+                        # Already has dates → already activated, nothing to do
+                        if win["clause_window_start"]:
+                            continue
+                        # Pre-created in pending with NULL dates → activate
+                        # by filling in the timeline starting now.
+                        try:
+                            await MarketService.update_market_window(
+                                win["id"],
+                                {
+                                    "clause_window_start": clause_start.isoformat(),
+                                    "clause_window_end": clause_end.isoformat(),
+                                    "market_window_start": market_start.isoformat(),
+                                    "market_window_end": market_end.isoformat(),
+                                    "reposition_draft_start": repo_start.isoformat(),
+                                    "reposition_draft_end": repo_end.isoformat(),
+                                },
+                            )
+                            print(f"[auto-market] activated window id={win['id']} league={league_id} phase={tgt_phase}")
+                        except Exception as e:
+                            print(f"[auto-market] error activating window {win['id']}: {e}")
+                        continue
+
+                    # Legacy fallback: window doesn't exist at all → create one.
                     try:
                         result = await MarketService.create_market_window(
                             league_id=league_id,

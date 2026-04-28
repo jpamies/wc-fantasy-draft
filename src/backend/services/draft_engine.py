@@ -224,6 +224,13 @@ class DraftEngine:
                     await auto_lineup_all_bots(league_id)
                 except Exception as e:
                     logging.getLogger("wc-fantasy.draft").warning(f"Failed to auto-lineup bots after draft completion: {e}")
+                # Pre-create market windows for all phases (pending, NULL dates).
+                # Auto-market-creator watchdog will fill in dates as phases complete.
+                try:
+                    from src.backend.services.market_service import MarketService
+                    await MarketService.ensure_league_market_windows(league_id)
+                except Exception as e:
+                    logging.getLogger("wc-fantasy.draft").warning(f"Failed to pre-create market windows: {e}")
             else:
                 await db.execute(
                     "UPDATE drafts SET current_round=$1, current_pick=$2 WHERE id=$3",
