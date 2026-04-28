@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS countries (
     name TEXT NOT NULL,
     name_local TEXT,
     flag TEXT,
-    confederation TEXT
+    confederation TEXT,
+    tournament_status TEXT DEFAULT 'alive' CHECK(tournament_status IN ('alive','eliminated','champion'))
 );
 
 CREATE TABLE IF NOT EXISTS players (
@@ -376,6 +377,18 @@ async def init_db():
             print("[DB] PostgreSQL schema created")
         else:
             print("[DB] PostgreSQL schema already exists, skipping")
+
+        # --- Migrations (idempotent) ---
+        has_ts = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='countries' AND column_name='tournament_status')"
+        )
+        if not has_ts:
+            await conn.execute(
+                "ALTER TABLE countries ADD COLUMN tournament_status TEXT DEFAULT 'alive' "
+                "CHECK(tournament_status IN ('alive','eliminated','champion'))"
+            )
+            print("[DB] Migration: added countries.tournament_status")
 
 
 async def close_pool():

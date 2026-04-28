@@ -253,6 +253,14 @@ async def sync_results() -> dict:
         await db.commit()
         
         logger.info(f"Synced {len(new_matches)} matches, {total_scores} scores, {teams_scored} team scores, removed {removed}")
+
+        # Sync country tournament status (alive / eliminated / champion)
+        try:
+            status_result = await sync_country_tournament_status()
+            logger.info(f"Country status sync: {status_result}")
+        except Exception as e:
+            logger.warning(f"Country status sync skipped: {e}")
+
         return {
             "synced_matches": len(new_matches),
             "synced_scores": total_scores,
@@ -311,3 +319,200 @@ async def _ensure_all_snapshots(matchday_ids: list[str]):
     for team in teams:
         for md_id in matchday_ids:
             await ensure_matchday_snapshot(team["id"], md_id)
+
+
+# --------------- Country tournament-status sync ---------------
+
+# Group-stage matchday IDs (3 rounds of group play)
+_GROUP_MATCHDAYS = {"GS1", "GS2", "GS3"}
+
+# Knockout phases in order
+_KNOCKOUT_PHASES = ["r32", "r16", "quarter", "semi", "final"]
+
+
+async def sync_country_tournament_status() -> dict:
+    """Determine which countries are alive / eliminated / champion and persist
+    the result in ``countries.tournament_status``.
+
+    Logic
+    -----
+    1. **Groups not complete** → everyone is ``alive``.
+    2. **Groups just completed** → top 2 per group + best 8 third-place teams
+       are ``alive``; the rest are ``eliminated``.
+    3. **Knockout** → the calendar tells us which countries are in
+       scheduled/live knockout matches (alive).  Countries that lost a
+       *finished* knockout match are ``eliminated``.
+    4. If the final is finished, the winner is ``champion``.
+
+    We derive everything from the simulator's ``/tournament/calendar``,
+    ``/tournament/standings`` and ``/tournament/overview``.
+    """
+    from src.backend.services.simulator_client import (
+        fetch_calendar,
+        fetch_standings,
+        fetch_tournament_overview,
+    )
+
+    overview = await fetch_tournament_overview()
+    current_phase = overview.get("current_phase", "groups")
+
+    # --- Collect all matches from the calendar ---------------------------------
+    calendar = await fetch_calendar()            # list of matchday dicts
+    all_matches: list[dict] = []
+    gs_matchday_ids_with_matches: set[str] = set()  # GS matchdays that exist
+    for md in calendar:
+        md_id = md.get("id") or md.get("matchday_id") or ""
+        for m in md.get("matches", []):
+            m["_md_id"] = md_id
+            all_matches.append(m)
+        if md_id in _GROUP_MATCHDAYS:
+            gs_matchday_ids_with_matches.add(md_id)
+
+    # Are all group-stage matchdays fully finished?
+    gs_matches = [m for m in all_matches if m["_md_id"] in _GROUP_MATCHDAYS]
+    groups_complete = (
+        len(gs_matches) > 0
+        and all(m.get("status") == "finished" for m in gs_matches)
+    )
+
+    # --- Phase 1: groups not done → everyone alive ----------------------------
+    if not groups_complete or current_phase == "groups":
+        db = await get_db()
+        try:
+            await db.execute("UPDATE countries SET tournament_status = 'alive'")
+            await db.commit()
+        finally:
+            await db.close()
+        return {"phase": "groups", "alive": "all"}
+
+    # --- Phase 2+: groups done → compute who qualifies / is eliminated --------
+
+    # 2a. Get standings to find qualified countries from groups
+    standings = await fetch_standings()
+    qualified_from_groups: set[str] = set()
+
+    # Top 2 per group always qualify
+    for group, teams in standings.items():
+        for t in teams[:2]:
+            cc = t.get("country_code", "")
+            if cc:
+                qualified_from_groups.add(cc)
+
+    # Best 8 third-place teams
+    thirds: list[dict] = []
+    for group, teams in standings.items():
+        if len(teams) >= 3:
+            thirds.append(teams[2])
+    thirds.sort(
+        key=lambda t: (
+            t.get("points", 0),
+            t.get("goals_for", 0) - t.get("goals_against", 0),
+            t.get("goals_for", 0),
+        ),
+        reverse=True,
+    )
+    for t in thirds[:8]:
+        cc = t.get("country_code", "")
+        if cc:
+            qualified_from_groups.add(cc)
+
+    # 2b. From knockout matches, figure out alive vs eliminated
+    knockout_matches = [
+        m for m in all_matches if m["_md_id"] not in _GROUP_MATCHDAYS
+    ]
+
+    # Countries appearing in any scheduled/live knockout match are alive
+    alive_in_knockout: set[str] = set()
+    eliminated_in_knockout: set[str] = set()
+
+    for m in knockout_matches:
+        status = m.get("status", "")
+        home = m.get("home_code") or ""
+        away = m.get("away_code") or ""
+
+        if status in ("scheduled", "live"):
+            if home:
+                alive_in_knockout.add(home)
+            if away:
+                alive_in_knockout.add(away)
+        elif status == "finished" and home and away:
+            # Determine loser → eliminated
+            sh = m.get("score_home")
+            sa = m.get("score_away")
+            ph = m.get("penalty_home")
+            pa = m.get("penalty_away")
+            winner = None
+            if sh is not None and sa is not None:
+                if sh > sa:
+                    winner = home
+                elif sa > sh:
+                    winner = away
+                elif ph is not None and pa is not None:
+                    winner = home if ph > pa else away
+            if winner:
+                loser = away if winner == home else home
+                eliminated_in_knockout.add(loser)
+                # Winner is alive unless eliminated in a LATER round
+                alive_in_knockout.add(winner)
+
+    # Remove anyone eliminated in knockout from alive
+    alive_in_knockout -= eliminated_in_knockout
+
+    # Final alive set: qualified from groups ∩ not eliminated in knockout
+    # + anyone still in a scheduled/live knockout match
+    alive: set[str] = set()
+    for cc in qualified_from_groups:
+        if cc not in eliminated_in_knockout:
+            alive.add(cc)
+    alive |= alive_in_knockout
+
+    # Special case: detect champion (tournament completed)
+    champion: str | None = None
+    if current_phase == "completed":
+        final_matches = [m for m in knockout_matches if m["_md_id"].upper() == "FINAL"]
+        for m in final_matches:
+            # The real final (not 3rd-place match) — try to identify
+            sh = m.get("score_home")
+            sa = m.get("score_away")
+            home = m.get("home_code", "")
+            away = m.get("away_code", "")
+            if sh is not None and sa is not None and home and away:
+                if sh > sa:
+                    champion = home
+                elif sa > sh:
+                    champion = away
+                else:
+                    ph = m.get("penalty_home")
+                    pa = m.get("penalty_away")
+                    if ph is not None and pa is not None:
+                        champion = home if ph > pa else away
+
+    # --- Persist ---------------------------------------------------------------
+    db = await get_db()
+    try:
+        # Default everything to eliminated
+        await db.execute("UPDATE countries SET tournament_status = 'eliminated'")
+
+        if alive:
+            placeholders = ",".join(f"${i+1}" for i in range(len(alive)))
+            await db.execute(
+                f"UPDATE countries SET tournament_status = 'alive' WHERE code IN ({placeholders})",
+                list(alive),
+            )
+
+        if champion:
+            await db.execute(
+                "UPDATE countries SET tournament_status = 'champion' WHERE code = $1",
+                (champion,),
+            )
+
+        await db.commit()
+    finally:
+        await db.close()
+
+    return {
+        "phase": current_phase,
+        "alive": len(alive),
+        "eliminated": len(qualified_from_groups | {cc for cc in eliminated_in_knockout}) - len(alive),
+        "champion": champion,
+    }

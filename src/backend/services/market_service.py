@@ -11,27 +11,36 @@ logger = logging.getLogger(__name__)
 async def get_alive_country_codes() -> Optional[set]:
     """Return the set of country codes still in the tournament.
 
-    A country is "alive" if it has played as many finished matches as the
-    country with the most. Returns ``None`` if the tournament hasn't started
-    yet (matches table empty), meaning every country should be considered
-    alive by callers.
+    Reads ``countries.tournament_status`` which is kept up-to-date by
+    ``sync_service.sync_country_tournament_status()`` after every score sync.
+
+    Returns ``None`` when the column doesn't exist yet or all countries are
+    alive (tournament hasn't started), meaning callers should treat everyone
+    as alive.
     """
     db = await get_db()
     try:
-        rows = await db.execute_fetchall(
-            """SELECT country, COUNT(*) AS cnt FROM (
-                   SELECT home_country AS country FROM matches WHERE status='finished'
-                   UNION ALL
-                   SELECT away_country AS country FROM matches WHERE status='finished'
-               ) sub
-               GROUP BY country"""
-        )
+        try:
+            rows = await db.execute_fetchall(
+                "SELECT code, tournament_status FROM countries WHERE tournament_status IS NOT NULL"
+            )
+        except Exception:
+            # Column might not exist yet (migration pending)
+            return None
     finally:
         await db.close()
+
     if not rows:
         return None
-    max_cnt = max(r["cnt"] for r in rows)
-    return {r["country"] for r in rows if r["cnt"] == max_cnt}
+
+    alive = {r["code"] for r in rows if r["tournament_status"] in ("alive", "champion")}
+    eliminated = {r["code"] for r in rows if r["tournament_status"] == "eliminated"}
+
+    # If nobody is eliminated yet, return None (all alive)
+    if not eliminated:
+        return None
+
+    return alive
 
 
 class MarketService:

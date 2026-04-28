@@ -91,6 +91,23 @@ async def fetch_calendar() -> list[dict]:
     return resp.json()
 
 
+async def fetch_tournament_overview() -> dict:
+    """Fetch tournament overview (current_phase, matches_played, etc.)."""
+    client = get_client()
+    resp = await client.get("/api/v1/tournament/overview", timeout=10.0)
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def fetch_standings() -> dict[str, list[dict]]:
+    """Fetch group standings from wc-simulator.
+    Returns {group_letter: [team_dicts sorted by position]}."""
+    client = get_client()
+    resp = await client.get("/api/v1/tournament/standings", timeout=10.0)
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def fetch_squad_players(country_code: str) -> list[dict]:
     """Fetch squad-selected players for a country."""
     client = get_client()
