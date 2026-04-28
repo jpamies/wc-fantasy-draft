@@ -571,7 +571,7 @@ class MarketService:
                    JOIN fantasy_teams ft ON mb.team_id = ft.id
                    LEFT JOIN team_players tp ON mb.team_id = tp.team_id
                    WHERE mb.market_window_id = $1
-                   GROUP BY mb.team_id
+                   GROUP BY mb.team_id, ft.team_name, ft.owner_nick, mb.remaining_budget
                    ORDER BY mb.remaining_budget DESC""",
                 (window_id,),
             )
@@ -635,7 +635,7 @@ class MarketService:
                    LEFT JOIN team_players tp ON rdp.team_id = tp.team_id
                    LEFT JOIN players p ON tp.player_id = p.id
                    WHERE rdp.market_window_id = $1
-                   GROUP BY rdp.team_id
+                   GROUP BY rdp.team_id, ft.team_name, ft.owner_nick, mb.remaining_budget, rdp.pick_number
                    ORDER BY rdp.pick_number""",
                 (window_id,),
             )
