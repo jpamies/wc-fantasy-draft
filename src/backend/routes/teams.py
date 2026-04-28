@@ -207,6 +207,32 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
                     (team_id, matchday_id, d["player_id"], d["is_starter"], d["is_captain"], d["is_vice_captain"]),
                 )
             await db.commit()
+        else:
+            # Backfill: any new player added to team_players AFTER the lineup was
+            # created (e.g. via reposition draft) won't have a matchday_lineups row
+            # yet, so they wouldn't appear in the lineup UI. Insert them as bench.
+            # Only for non-completed matchdays.
+            md_status = await db.execute_fetchall(
+                "SELECT status FROM matchdays WHERE id=$1", (matchday_id,)
+            )
+            is_completed = bool(md_status) and md_status[0]["status"] == "completed"
+            if not is_completed:
+                missing = await db.execute_fetchall(
+                    """SELECT tp.player_id FROM team_players tp
+                       LEFT JOIN matchday_lineups ml
+                         ON ml.team_id = tp.team_id
+                        AND ml.matchday_id = $1
+                        AND ml.player_id = tp.player_id
+                       WHERE tp.team_id = $2 AND ml.player_id IS NULL""",
+                    (matchday_id, team_id),
+                )
+                if missing:
+                    for m in missing:
+                        await db.execute(
+                            "INSERT INTO matchday_lineups (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain) VALUES ($1,$2,$3,0,0,0) ON CONFLICT DO NOTHING",
+                            (team_id, matchday_id, m["player_id"]),
+                        )
+                    await db.commit()
 
         # Fetch lineup with player details, matchday points, and avg points
         rows = await db.execute_fetchall(
