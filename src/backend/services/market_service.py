@@ -837,16 +837,15 @@ class MarketService:
 
         Returns players that:
           - are not currently in any team of this league, AND
-          - belong to a country that is still in the tournament.
+          - belong to a country still alive in the tournament (qualified for
+            the next round, not eliminated).
 
         Uses the simulator as the primary data source so photos, market
-        values and club info are always present (the local players table
-        may be a stub created by the score sync). Each player is enriched
+        values and club info are always present. Each player is enriched
         with ``total_points`` from match_scores.
 
-        "Alive" definition: the country has played as many matches as the
-        country that has played the most. If no matches exist yet, the
-        tournament hasn't started so every country is considered alive.
+        Country status comes from ``countries.tournament_status`` which is
+        kept up-to-date by ``sync_country_tournament_status()``.
         """
         from src.backend.config import settings
 
@@ -860,20 +859,9 @@ class MarketService:
             )
             owned_ids = {r["player_id"] for r in owned_rows}
 
-            # 2. Alive country set.
-            counts_rows = await db.execute_fetchall(
-                """SELECT country, COUNT(*) as cnt FROM (
-                       SELECT home_country AS country FROM matches WHERE status='finished'
-                       UNION ALL
-                       SELECT away_country AS country FROM matches WHERE status='finished'
-                   ) sub
-                   GROUP BY country"""
-            )
-            if counts_rows:
-                max_cnt = max(r["cnt"] for r in counts_rows)
-                alive_codes = {r["country"] for r in counts_rows if r["cnt"] == max_cnt}
-            else:
-                alive_codes = None  # tournament not started → no filter
+            # 2. Alive country set (uses countries.tournament_status synced
+            #    by sync_country_tournament_status — accurate across all phases).
+            alive_codes = await get_alive_country_codes()
 
             # 3. Total points per player (from match_scores).
             score_rows = await db.execute_fetchall(
