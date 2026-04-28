@@ -369,10 +369,11 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
                         <span>🔒 Bloqueo</span>
                     </label>
                 </div>
-                <div class="clause-presets" data-pid="${p.player_id}" style="display:flex;flex-wrap:wrap;gap:.25rem">
+                <div class="clause-presets" data-pid="${p.player_id}" style="display:flex;flex-wrap:wrap;gap:.25rem;${blocked ? 'opacity:.4;pointer-events:none' : ''}">
                     ${CLAUSE_PRESETS.map(preset => `
-                        <button type="button" class="btn btn-sm preset-btn ${preset.v === amount ? 'btn-primary' : 'btn-outline'}"
+                        <button type="button" class="btn btn-sm preset-btn ${(!blocked && preset.v === amount) ? 'btn-primary' : 'btn-outline'}"
                             data-pid="${p.player_id}" data-value="${preset.v}"
+                            ${blocked ? 'disabled' : ''}
                             style="flex:1;min-width:48px;padding:.3rem .25rem;font-size:.75rem">
                             ${preset.label}
                         </button>
@@ -418,8 +419,9 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
             const groupTotals = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
             const groupBlocked = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
             document.querySelectorAll('.clause-card').forEach(card => {
-                const amt = parseInt(card.dataset.amount || '0', 10);
                 const blk = card.dataset.blocked === '1';
+                // Blocked players don't consume the protect_budget.
+                const amt = blk ? 0 : parseInt(card.dataset.amount || '0', 10);
                 total += amt;
                 if (blk) blockedCount += 1;
                 const pos = card.dataset.pos;
@@ -482,6 +484,29 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
                 const pid = cb.dataset.pid;
                 const card = form.querySelector(`.clause-card[data-pid="${pid}"]`);
                 card.dataset.blocked = cb.checked ? '1' : '0';
+                // When blocked: clear amount, deselect/disable preset buttons.
+                // When unblocked: re-enable preset buttons (amount stays at 0).
+                const presets = form.querySelector(`.clause-presets[data-pid="${pid}"]`);
+                if (cb.checked) {
+                    card.dataset.amount = '0';
+                    if (presets) {
+                        presets.style.opacity = '.4';
+                        presets.style.pointerEvents = 'none';
+                    }
+                    form.querySelectorAll(`.preset-btn[data-pid="${pid}"]`).forEach(b => {
+                        b.disabled = true;
+                        b.classList.remove('btn-primary');
+                        b.classList.add('btn-outline');
+                    });
+                } else {
+                    if (presets) {
+                        presets.style.opacity = '';
+                        presets.style.pointerEvents = '';
+                    }
+                    form.querySelectorAll(`.preset-btn[data-pid="${pid}"]`).forEach(b => {
+                        b.disabled = false;
+                    });
+                }
                 recalc();
             });
         });
@@ -502,6 +527,9 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
             try {
                 await API.post(`/teams/${teamId}/market/${windowId}/clauses/set`, { clauses: newClauses });
                 showToast('Cláusulas guardadas', 'success');
+                // Reload to reflect any normalization (blocked → amount=0)
+                const fresh = await API.get(`/teams/${teamId}/market/${windowId}/clauses`);
+                await loadClauseForm(leagueId, teamId, windowId, fresh, win);
             } catch (err) {
                 showToast(err.message, 'error');
             }

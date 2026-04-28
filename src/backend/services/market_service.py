@@ -175,7 +175,13 @@ class MarketService:
 
     @staticmethod
     async def start_market_phase(window_id: int) -> Dict[str, Any]:
-        """Transition to market_open phase and initialize budgets for all teams."""
+        """Transition to market_open phase and initialize budgets for all teams.
+
+        Side effect: any player with clause_amount=0 and is_blocked=False has
+        been flagged for release (SELL). Those players leave their team
+        (deleted from team_players + matchday_lineups for upcoming matchdays)
+        and become free agents, freeing squad slots.
+        """
         db = await get_db()
         try:
             window = await MarketService.get_market_window(window_id)
@@ -186,6 +192,35 @@ class MarketService:
                 "UPDATE market_windows SET status='market_open', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
+
+            # Release SELL players (clause=0 and not blocked) from their teams.
+            sell_rows = await db.execute_fetchall(
+                """SELECT pc.team_id, pc.player_id
+                   FROM player_clauses pc
+                   JOIN fantasy_teams ft ON pc.team_id = ft.id
+                   WHERE pc.market_window_id=$1 AND ft.league_id=$2
+                     AND pc.clause_amount = 0 AND pc.is_blocked = 0""",
+                (window_id, league_id),
+            )
+            released = 0
+            for row in sell_rows:
+                team_id = row["team_id"]
+                player_id = row["player_id"]
+                # Remove from squad
+                await db.execute(
+                    "DELETE FROM team_players WHERE team_id=$1 AND player_id=$2",
+                    (team_id, player_id),
+                )
+                # Remove from any future-locked lineups (best-effort)
+                await db.execute(
+                    "DELETE FROM matchday_lineups WHERE team_id=$1 AND player_id=$2",
+                    (team_id, player_id),
+                )
+                released += 1
+            if released:
+                logger.info(
+                    f"Released {released} SELL players (clause=0, not blocked) at market open for window {window_id}"
+                )
 
             # Initialize budgets for all teams in league
             teams = await db.execute_fetchall(
@@ -238,12 +273,26 @@ class MarketService:
     async def set_player_clauses(
         window_id: int, team_id: str, clauses: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Set clause values for player list."""
+        """Set clause values for player list.
+
+        Blocked players don't consume the protect_budget (they're unrobable
+        regardless of amount), and their clause_amount is forced to 0 to
+        avoid confusion. Players with clause_amount=0 and not blocked are
+        flagged for release when the market opens.
+        """
         db = await get_db()
         try:
-            # Validate clause count and total budget
+            # Normalize: blocked players ignore any clause_amount (set to 0).
+            for c in clauses:
+                if c.get("is_blocked"):
+                    c["clause_amount"] = 0
+
+            # Validate clause count and total budget. Blocked players are
+            # excluded from the protect_budget computation.
             blocked_count = sum(1 for c in clauses if c.get("is_blocked"))
-            total_budget = sum(c.get("clause_amount", 0) for c in clauses)
+            total_budget = sum(
+                c.get("clause_amount", 0) for c in clauses if not c.get("is_blocked")
+            )
 
             window = await MarketService.get_market_window(window_id)
             if blocked_count > 2:
