@@ -54,15 +54,20 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error creating market window: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def get_market_window(window_id: int) -> Optional[Dict[str, Any]]:
         """Get market window details."""
         db = await get_db()
-        result = await db.execute_fetchall(
-            "SELECT * FROM market_windows WHERE id=$1", (window_id,)
-        )
-        return dict(result[0]) if result else None
+        try:
+            result = await db.execute_fetchall(
+                "SELECT * FROM market_windows WHERE id=$1", (window_id,)
+            )
+            return dict(result[0]) if result else None
+        finally:
+            await db.close()
 
     @staticmethod
     async def update_market_window(window_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -98,6 +103,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error updating market window: {e}")
             raise
+        finally:
+            await db.close()
 
     # Phases of the FIFA WC 2026 that get a market window between them.
     # Order matters: each window is created for the phase named here AFTER the
@@ -146,6 +153,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error ensuring market windows for league {league_id}: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def start_clause_phase(window_id: int) -> Dict[str, Any]:
@@ -161,6 +170,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error starting clause phase: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def start_market_phase(window_id: int) -> Dict[str, Any]:
@@ -201,6 +212,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error starting market phase: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def close_market(window_id: int) -> Dict[str, Any]:
@@ -216,6 +229,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error closing market: {e}")
             raise
+        finally:
+            await db.close()
 
     # ==================== PLAYER CLAUSES ====================
 
@@ -260,19 +275,24 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error setting player clauses: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def get_team_clauses(window_id: int, team_id: str) -> List[Dict[str, Any]]:
         """Get all clauses set by a team for a market window."""
         db = await get_db()
-        clauses = await db.execute_fetchall(
-            """SELECT pc.player_id, p.name, pc.clause_amount, pc.is_blocked
-               FROM player_clauses pc
-               JOIN players p ON pc.player_id = p.id
-               WHERE pc.market_window_id=$1 AND pc.team_id=$2""",
-            (window_id, team_id),
-        )
-        return [dict(c) for c in clauses]
+        try:
+            clauses = await db.execute_fetchall(
+                """SELECT pc.player_id, p.name, pc.clause_amount, pc.is_blocked
+                   FROM player_clauses pc
+                   JOIN players p ON pc.player_id = p.id
+                   WHERE pc.market_window_id=$1 AND pc.team_id=$2""",
+                (window_id, team_id),
+            )
+            return [dict(c) for c in clauses]
+        finally:
+            await db.close()
 
     # ==================== MARKET TRANSACTIONS ====================
 
@@ -280,17 +300,20 @@ class MarketService:
     async def get_market_budget(window_id: int, team_id: str) -> Optional[Dict[str, Any]]:
         """Get current budget for team in market window."""
         db = await get_db()
-        result = await db.execute_fetchall(
-            "SELECT * FROM market_budgets WHERE market_window_id=$1 AND team_id=$2",
-            (window_id, team_id),
-        )
-        if result:
-            budget = dict(result[0])
-            window = await MarketService.get_market_window(window_id)
-            budget["max_buys"] = window["max_buys"]
-            budget["max_sells"] = window["max_sells"]
-            return budget
-        return None
+        try:
+            result = await db.execute_fetchall(
+                "SELECT * FROM market_budgets WHERE market_window_id=$1 AND team_id=$2",
+                (window_id, team_id),
+            )
+            if result:
+                budget = dict(result[0])
+                window = await MarketService.get_market_window(window_id)
+                budget["max_buys"] = window["max_buys"]
+                budget["max_sells"] = window["max_sells"]
+                return budget
+            return None
+        finally:
+            await db.close()
 
     @staticmethod
     async def get_available_players(
@@ -298,31 +321,34 @@ class MarketService:
     ) -> List[Dict[str, Any]]:
         """Get list of players available for purchase (with their clauses)."""
         db = await get_db()
+        try:
 
-        query = """
-            SELECT DISTINCT tp.player_id, p.name, p.position, p.country_code, p.photo, p.market_value,
-                   tp.team_id as current_team_id, ft.team_name as current_team_name,
-                   COALESCE(pc.clause_amount, 0) as clause_amount,
-                   COALESCE(pc.is_blocked, 0) as is_blocked
-            FROM team_players tp
-            JOIN fantasy_teams ft ON tp.team_id = ft.id
-            JOIN players p ON tp.player_id = p.id
-            LEFT JOIN player_clauses pc ON pc.player_id = tp.player_id 
-                AND pc.team_id = tp.team_id 
-                AND pc.market_window_id = $1
-            WHERE ft.league_id = $2
-        """
+            query = """
+                SELECT DISTINCT tp.player_id, p.name, p.position, p.country_code, p.photo, p.market_value,
+                       tp.team_id as current_team_id, ft.team_name as current_team_name,
+                       COALESCE(pc.clause_amount, 0) as clause_amount,
+                       COALESCE(pc.is_blocked, 0) as is_blocked
+                FROM team_players tp
+                JOIN fantasy_teams ft ON tp.team_id = ft.id
+                JOIN players p ON tp.player_id = p.id
+                LEFT JOIN player_clauses pc ON pc.player_id = tp.player_id 
+                    AND pc.team_id = tp.team_id 
+                    AND pc.market_window_id = $1
+                WHERE ft.league_id = $2
+            """
 
-        params = [window_id, league_id]
+            params = [window_id, league_id]
 
-        if position:
-            query += " AND p.position = $3"
-            params.append(position)
+            if position:
+                query += " AND p.position = $3"
+                params.append(position)
 
-        query += " ORDER BY p.market_value DESC"
+            query += " ORDER BY p.market_value DESC"
 
-        players = await db.execute_fetchall(query, params)
-        return [dict(p) for p in players]
+            players = await db.execute_fetchall(query, params)
+            return [dict(p) for p in players]
+        finally:
+            await db.close()
 
     @staticmethod
     async def buy_player(
@@ -425,27 +451,32 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error buying player: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def get_transaction_history(window_id: int, team_id: str) -> List[Dict[str, Any]]:
         """Get transaction history for a team in a market window."""
         db = await get_db()
-        transactions = await db.execute_fetchall(
-            """SELECT mt.id, mt.buyer_team_id, bt.team_name as buyer_team_name,
-                      mt.seller_team_id, st.team_name as seller_team_name,
-                      mt.player_id, p.name as player_name,
-                      mt.clause_amount_paid, mt.transaction_date,
-                      CASE WHEN mt.buyer_team_id = $1 THEN 'bought' ELSE 'sold' END as direction
-               FROM market_transactions mt
-               JOIN fantasy_teams bt ON mt.buyer_team_id = bt.id
-               JOIN fantasy_teams st ON mt.seller_team_id = st.id
-               JOIN players p ON mt.player_id = p.id
-               WHERE mt.market_window_id = $2 
-                 AND (mt.buyer_team_id = $3 OR mt.seller_team_id = $4)
-               ORDER BY mt.transaction_date DESC""",
-            (team_id, window_id, team_id, team_id),
-        )
-        return [dict(t) for t in transactions]
+        try:
+            transactions = await db.execute_fetchall(
+                """SELECT mt.id, mt.buyer_team_id, bt.team_name as buyer_team_name,
+                          mt.seller_team_id, st.team_name as seller_team_name,
+                          mt.player_id, p.name as player_name,
+                          mt.clause_amount_paid, mt.transaction_date,
+                          CASE WHEN mt.buyer_team_id = $1 THEN 'bought' ELSE 'sold' END as direction
+                   FROM market_transactions mt
+                   JOIN fantasy_teams bt ON mt.buyer_team_id = bt.id
+                   JOIN fantasy_teams st ON mt.seller_team_id = st.id
+                   JOIN players p ON mt.player_id = p.id
+                   WHERE mt.market_window_id = $2 
+                     AND (mt.buyer_team_id = $3 OR mt.seller_team_id = $4)
+                   ORDER BY mt.transaction_date DESC""",
+                (team_id, window_id, team_id, team_id),
+            )
+            return [dict(t) for t in transactions]
+        finally:
+            await db.close()
 
     # ==================== REPOSITION DRAFT ====================
 
@@ -469,6 +500,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error calculating reposition draft order: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def start_reposition_draft(window_id: int) -> Dict[str, Any]:
@@ -498,6 +531,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error starting reposition draft: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def get_reposition_draft_state(window_id: int, team_id: str) -> Dict[str, Any]:
@@ -571,6 +606,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error getting reposition draft state: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def get_reposition_available_players(
@@ -596,6 +633,8 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error getting available reposition players: {e}")
             raise
+        finally:
+            await db.close()
 
     @staticmethod
     async def make_reposition_draft_pick(
@@ -686,3 +725,5 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error making reposition draft pick: {e}")
             raise
+        finally:
+            await db.close()
