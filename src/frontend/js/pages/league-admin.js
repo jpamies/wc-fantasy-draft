@@ -171,6 +171,11 @@ async function loadMarketsList(leagueId) {
                             <td>${statusBadge(w.status)}</td>
                             <td>${formatMadrid(w.clause_window_start)}</td>
                             <td>
+                                ${w.status !== 'completed' ? `
+                                    <button class="btn btn-sm btn-primary btn-force-advance" data-wid="${w.id}" data-status="${w.status}">
+                                        ⏭️ Avanzar fase
+                                    </button>
+                                ` : ''}
                                 ${['market_open','market_closed','reposition_draft'].includes(w.status) ? `
                                     <button class="btn btn-sm btn-secondary btn-rewind-clause" data-wid="${w.id}">
                                         ⏪ Rebobinar a Cláusulas
@@ -192,6 +197,26 @@ async function loadMarketsList(leagueId) {
                 try {
                     await API.post(`/leagues/${leagueId}/admin/market-windows/${btn.dataset.wid}/rewind-to-clause`, {});
                     showToast('Mercado rebobinado a fase de Cláusulas', 'success');
+                    await loadMarketsList(leagueId);
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            });
+        });
+
+        container.querySelectorAll('.btn-force-advance').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const next = {
+                    pending: 'Cláusulas',
+                    clause_window: 'Mercado abierto',
+                    market_open: 'Mercado cerrado',
+                    market_closed: 'Reposición',
+                    reposition_draft: 'Finalizado',
+                }[btn.dataset.status] || 'siguiente fase';
+                if (!confirm(`¿Avanzar este mercado a "${next}" (ignorando fechas)?`)) return;
+                try {
+                    const r = await API.post(`/leagues/${leagueId}/admin/market-windows/${btn.dataset.wid}/force-advance`, {});
+                    showToast(`Avanzado: ${r.previous_status} → ${r.status}`, 'success');
                     await loadMarketsList(leagueId);
                 } catch (err) {
                     showToast(err.message, 'error');

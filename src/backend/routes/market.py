@@ -230,6 +230,119 @@ async def rewind_to_clause(
     return {"ok": True, "window_id": window_id, "status": "clause_window"}
 
 
+@router.post("/leagues/{league_id}/admin/market-windows/{window_id}/force-advance")
+async def force_advance_market_phase(
+    league_id: str,
+    window_id: int,
+    current_team: dict = Depends(get_current_team),
+):
+    """Force-advance a market window to the next phase, ignoring dates.
+
+    Useful for testing: jumps `pending → clause_window → market_open →
+    market_closed → reposition_draft → completed`. Also stretches the
+    remaining deadlines forward by 24h each so the watchdog doesn't
+    immediately cascade through the rest of the phases.
+    """
+    if current_team.get("league_id") != league_id or not current_team.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from datetime import datetime, timezone, timedelta
+    from src.backend.database import get_db
+
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            "SELECT * FROM market_windows WHERE id=$1 AND league_id=$2",
+            (window_id, league_id),
+        )
+        if not rows:
+            raise HTTPException(404, "Window not found")
+        w = dict(rows[0])
+    finally:
+        await db.close()
+
+    status = w["status"]
+    now = datetime.now(timezone.utc)
+
+    # Stretch later deadlines so watchdog doesn't cascade further.
+    new_clause_start = (now - timedelta(minutes=1)).isoformat()
+    new_clause_end = (now + timedelta(hours=24)).isoformat()
+    new_market_start = (now + timedelta(hours=24, minutes=1)).isoformat()
+    new_market_end = (now + timedelta(hours=48)).isoformat()
+    new_repo_start = (now + timedelta(hours=48, minutes=1)).isoformat()
+    new_repo_end = (now + timedelta(hours=72)).isoformat()
+
+    db = await get_db()
+    try:
+        if status == "pending":
+            # advance to clause_window: anchor clause_start in the past so
+            # we're "in" the clause window, push clause_end forward 24h.
+            await db.execute(
+                """UPDATE market_windows SET status='clause_window',
+                       clause_window_start=$1, clause_window_end=$2,
+                       market_window_start=$3, market_window_end=$4,
+                       reposition_draft_start=$5, reposition_draft_end=$6,
+                       updated_at=$7
+                   WHERE id=$8""",
+                (new_clause_start, new_clause_end, new_market_start, new_market_end,
+                 new_repo_start, new_repo_end, now.isoformat(), window_id),
+            )
+            await db.commit()
+            new_status = "clause_window"
+        elif status == "clause_window":
+            await db.commit()
+            await db.close()
+            await MarketService.start_market_phase(window_id)
+            db = await get_db()
+            await db.execute(
+                """UPDATE market_windows SET
+                       market_window_start=$1, market_window_end=$2,
+                       reposition_draft_start=$3, reposition_draft_end=$4,
+                       updated_at=$5
+                   WHERE id=$6""",
+                ((now - timedelta(minutes=1)).isoformat(),
+                 (now + timedelta(hours=24)).isoformat(),
+                 (now + timedelta(hours=24, minutes=1)).isoformat(),
+                 (now + timedelta(hours=48)).isoformat(),
+                 now.isoformat(), window_id),
+            )
+            await db.commit()
+            new_status = "market_open"
+        elif status == "market_open":
+            await db.close()
+            await MarketService.close_market(window_id)
+            db = await get_db()
+            await db.execute(
+                """UPDATE market_windows SET
+                       reposition_draft_start=$1, reposition_draft_end=$2,
+                       updated_at=$3
+                   WHERE id=$4""",
+                ((now - timedelta(minutes=1)).isoformat(),
+                 (now + timedelta(hours=24)).isoformat(),
+                 now.isoformat(), window_id),
+            )
+            await db.commit()
+            new_status = "market_closed"
+        elif status == "market_closed":
+            await db.close()
+            await MarketService.start_reposition_draft(window_id)
+            new_status = "reposition_draft"
+            db = await get_db()
+        elif status == "reposition_draft":
+            await db.execute(
+                "UPDATE market_windows SET status='completed', updated_at=$1 WHERE id=$2",
+                (now.isoformat(), window_id),
+            )
+            await db.commit()
+            new_status = "completed"
+        else:
+            raise HTTPException(400, f"Cannot advance from status '{status}'")
+    finally:
+        await db.close()
+
+    return {"ok": True, "window_id": window_id, "previous_status": status, "status": new_status}
+
+
 @router.post("/leagues/{league_id}/admin/market-windows/{window_id}/start-market-phase")
 async def start_market_phase(
     league_id: str,
