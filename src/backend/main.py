@@ -21,6 +21,31 @@ async def lifespan(app: FastAPI):
     if settings.SIMULATOR_API_URL:
         print(f"Simulator API configured: {settings.SIMULATOR_API_URL}")
         print("Player data will be fetched live from wc-simulator.")
+        # Sync country metadata (names, flags) from simulator on startup so
+        # the UI can render flags. Idempotent — updates rows that exist.
+        try:
+            from src.backend.services.simulator_client import fetch_countries
+            from src.backend.database import get_db
+            countries = await fetch_countries()
+            db = await get_db()
+            try:
+                for c in countries:
+                    await db.execute(
+                        """INSERT INTO countries (code, name, flag, confederation)
+                           VALUES ($1, $2, $3, $4)
+                           ON CONFLICT (code) DO UPDATE SET
+                               name = EXCLUDED.name,
+                               flag = COALESCE(EXCLUDED.flag, countries.flag),
+                               confederation = COALESCE(EXCLUDED.confederation, countries.confederation)""",
+                        (c.get("code"), c.get("name") or c.get("code"),
+                         c.get("flag"), c.get("confederation")),
+                    )
+                await db.commit()
+                print(f"Synced {len(countries)} countries from simulator (flags + names)")
+            finally:
+                await db.close()
+        except Exception as e:
+            print(f"Country sync skipped: {e}")
     else:
         print("⚠️  No SIMULATOR_API_URL configured.")
         print("   Set SIMULATOR_API_URL to point to wc-simulator for player data.")

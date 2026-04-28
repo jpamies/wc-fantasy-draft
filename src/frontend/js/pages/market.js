@@ -253,12 +253,18 @@ const ISO3_TO_ISO2 = {
 };
 
 function flagFor(player) {
-    if (player.country_flag) return player.country_flag;
+    // Backend returns country_flag as either an http(s) URL (flagcdn.com)
+    // or an empty string. Render <img> when URL, fall back to emoji otherwise.
+    const f = player.country_flag;
+    if (f && /^https?:\/\//i.test(f)) {
+        return `<img src="${f}" alt="${player.country_code || ''}" referrerpolicy="no-referrer" style="width:24px;height:auto;border-radius:2px;display:inline-block;vertical-align:middle">`;
+    }
+    if (f) return `<span style="font-size:1.4rem;line-height:1">${f}</span>`;
     const iso2 = ISO3_TO_ISO2[player.country_code];
     if (!iso2 || iso2.length !== 2) return '';
-    // Convert ISO-2 to regional indicator emoji
     const A = 0x1F1E6;
-    return String.fromCodePoint(A + iso2.charCodeAt(0) - 65, A + iso2.charCodeAt(1) - 65);
+    const emoji = String.fromCodePoint(A + iso2.charCodeAt(0) - 65, A + iso2.charCodeAt(1) - 65);
+    return `<span style="font-size:1.4rem;line-height:1">${emoji}</span>`;
 }
 
 function positionBadgeClass(pos) {
@@ -276,13 +282,87 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
         const protectBudget = win.protect_budget;
         const MAX_BLOCKED = 2;
 
-        // Sort: starters first, then by market_value desc
-        const players = [...team.players].sort((a, b) => {
-            if (a.is_starter !== b.is_starter) return b.is_starter - a.is_starter;
-            return (b.market_value || 0) - (a.market_value || 0);
-        });
+        // Group players by position. Order: GK, DEF, MID, FWD.
+        const POSITION_ORDER = [
+            { key: 'GK',  label: 'Porteros',        icon: '🧤' },
+            { key: 'DEF', label: 'Defensas',        icon: '🛡️' },
+            { key: 'MID', label: 'Centrocampistas', icon: '⚙️' },
+            { key: 'FWD', label: 'Delanteros',      icon: '⚽' },
+        ];
+
+        const byPosition = {};
+        for (const p of team.players) {
+            const k = p.position || 'MID';
+            (byPosition[k] = byPosition[k] || []).push(p);
+        }
+        // Within each position: starters first, then by market_value desc
+        for (const k of Object.keys(byPosition)) {
+            byPosition[k].sort((a, b) => {
+                if (a.is_starter !== b.is_starter) return b.is_starter - a.is_starter;
+                return (b.market_value || 0) - (a.market_value || 0);
+            });
+        }
 
         const clauseFor = (pid) => clauses.find(c => c.player_id === pid);
+
+        const cardHtml = (p) => {
+            const c = clauseFor(p.player_id);
+            const amount = c?.clause_amount || 0;
+            const blocked = !!c?.is_blocked;
+            const flag = flagFor(p);
+            const points = p.total_points ?? 0;
+            return `
+            <div class="card clause-card" data-pid="${p.player_id}" data-pos="${p.position}" data-amount="${amount}" data-blocked="${blocked ? '1' : '0'}"
+                style="padding:.75rem;display:flex;flex-direction:column;gap:.5rem">
+                <div style="display:flex;align-items:center;gap:.5rem">
+                    <div style="flex:0 0 auto">${flag}</div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.name}">${p.name}</div>
+                        <div style="font-size:.7rem;color:var(--text-muted)">${p.country_code} · ${p.club || ''}</div>
+                    </div>
+                    <span class="badge ${positionBadgeClass(p.position)} badge-small">${p.position}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:.8rem;flex-wrap:wrap;gap:.4rem">
+                    <span style="color:var(--text-muted)">Valor: ${formatMoney(p.market_value || 0)}</span>
+                    <span style="color:var(--accent-teal);font-weight:600">⭐ ${points} pts</span>
+                    <label class="lock-toggle" style="display:flex;align-items:center;gap:.25rem;cursor:pointer">
+                        <input type="checkbox" class="blocked-checkbox" data-pid="${p.player_id}" ${blocked ? 'checked' : ''}>
+                        <span>🔒 Bloqueo</span>
+                    </label>
+                </div>
+                <div class="clause-presets" data-pid="${p.player_id}" style="display:flex;flex-wrap:wrap;gap:.25rem">
+                    ${CLAUSE_PRESETS.map(preset => `
+                        <button type="button" class="btn btn-sm preset-btn ${preset.v === amount ? 'btn-primary' : 'btn-outline'}"
+                            data-pid="${p.player_id}" data-value="${preset.v}"
+                            style="flex:1;min-width:48px;padding:.3rem .25rem;font-size:.75rem">
+                            ${preset.label}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>`;
+        };
+
+        const groupHtml = (g) => {
+            const list = byPosition[g.key] || [];
+            if (!list.length) return '';
+            // Compute group totals (initial render, refreshed by recalc())
+            const groupTotal = list.reduce((s, p) => s + (clauseFor(p.player_id)?.clause_amount || 0), 0);
+            const groupBlocked = list.filter(p => clauseFor(p.player_id)?.is_blocked).length;
+            return `
+                <details class="clause-group" data-pos="${g.key}" open style="margin-bottom:.75rem;border:1px solid var(--border);border-radius:6px">
+                    <summary style="cursor:pointer;padding:.6rem .75rem;display:flex;justify-content:space-between;align-items:center;background:var(--bg-secondary);border-radius:6px;list-style:none">
+                        <span style="font-weight:600">${g.icon} ${g.label} <span style="color:var(--text-muted);font-weight:400">(${list.length})</span></span>
+                        <span style="font-size:.85rem;color:var(--text-muted)">
+                            <span class="group-total" data-pos="${g.key}">${formatMoney(groupTotal)}</span>
+                            · 🔒 <span class="group-blocked" data-pos="${g.key}">${groupBlocked}</span>
+                        </span>
+                    </summary>
+                    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem;padding:.75rem">
+                        ${list.map(cardHtml).join('')}
+                    </div>
+                </details>
+            `;
+        };
 
         form.innerHTML = `
             <div id="clauses-summary" style="position:sticky;top:0;z-index:5;margin-bottom:1rem;padding:.75rem;background:var(--bg-secondary);border-radius:6px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
@@ -290,50 +370,24 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
                 <div><strong>Bloqueados:</strong> <span id="clauses-blocked">0</span> / ${MAX_BLOCKED}</div>
                 <div><strong>Restante:</strong> <span id="clauses-remaining">${formatMoney(protectBudget)}</span></div>
             </div>
-            <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem">
-            ${players.map(p => {
-                const c = clauseFor(p.player_id);
-                const amount = c?.clause_amount || 0;
-                const blocked = !!c?.is_blocked;
-                const flag = flagFor(p);
-                return `
-                <div class="card clause-card" data-pid="${p.player_id}" data-amount="${amount}" data-blocked="${blocked ? '1' : '0'}"
-                    style="padding:.75rem;display:flex;flex-direction:column;gap:.5rem">
-                    <div style="display:flex;align-items:center;gap:.5rem">
-                        <div style="font-size:1.5rem;line-height:1">${flag}</div>
-                        <div style="flex:1;min-width:0">
-                            <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.name}">${p.name}</div>
-                            <div style="font-size:.7rem;color:var(--text-muted)">${p.country_code} · ${p.club || ''}</div>
-                        </div>
-                        <span class="badge ${positionBadgeClass(p.position)} badge-small">${p.position}</span>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;font-size:.8rem">
-                        <span style="color:var(--text-muted)">Valor: ${formatMoney(p.market_value || 0)}</span>
-                        <label class="lock-toggle" style="display:flex;align-items:center;gap:.25rem;cursor:pointer">
-                            <input type="checkbox" class="blocked-checkbox" data-pid="${p.player_id}" ${blocked ? 'checked' : ''}>
-                            <span>🔒 Bloqueo</span>
-                        </label>
-                    </div>
-                    <div class="clause-presets" data-pid="${p.player_id}" style="display:flex;flex-wrap:wrap;gap:.25rem">
-                        ${CLAUSE_PRESETS.map(preset => `
-                            <button type="button" class="btn btn-sm preset-btn ${preset.v === amount ? 'btn-primary' : 'btn-outline'}"
-                                data-pid="${p.player_id}" data-value="${preset.v}"
-                                style="flex:1;min-width:48px;padding:.3rem .25rem;font-size:.75rem">
-                                ${preset.label}
-                            </button>
-                        `).join('')}
-                    </div>
-                </div>`;
-            }).join('')}
-            </div>
+            ${POSITION_ORDER.map(groupHtml).join('')}
         `;
 
         const recalc = () => {
             let total = 0;
             let blockedCount = 0;
+            const groupTotals = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+            const groupBlocked = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
             document.querySelectorAll('.clause-card').forEach(card => {
-                total += parseInt(card.dataset.amount || '0', 10);
-                if (card.dataset.blocked === '1') blockedCount += 1;
+                const amt = parseInt(card.dataset.amount || '0', 10);
+                const blk = card.dataset.blocked === '1';
+                total += amt;
+                if (blk) blockedCount += 1;
+                const pos = card.dataset.pos;
+                if (pos in groupTotals) {
+                    groupTotals[pos] += amt;
+                    if (blk) groupBlocked[pos] += 1;
+                }
             });
             const totalEl = document.getElementById('clauses-total');
             const blockedEl = document.getElementById('clauses-blocked');
@@ -351,6 +405,13 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
                 remainingEl.textContent = formatMoney(Math.max(0, remaining));
                 remainingEl.style.color = remaining < 0 ? 'var(--danger)' : '';
             }
+            // Update group summaries
+            document.querySelectorAll('.group-total').forEach(el => {
+                el.textContent = formatMoney(groupTotals[el.dataset.pos] || 0);
+            });
+            document.querySelectorAll('.group-blocked').forEach(el => {
+                el.textContent = groupBlocked[el.dataset.pos] || 0;
+            });
             // Disable unchecked lock checkboxes when limit reached
             const limitReached = blockedCount >= MAX_BLOCKED;
             document.querySelectorAll('.blocked-checkbox').forEach(cb => {
