@@ -101,10 +101,39 @@ async def get_team(team_id: str):
                 # Skip this row rather than failing the whole team page.
                 continue
 
+        # Budget: prefer latest market_budgets remaining if available
+        effective_budget = team["budget"]
+        try:
+            latest_mb = await db.execute_fetchall(
+                """SELECT mb.remaining_budget
+                   FROM market_budgets mb
+                   JOIN market_windows mw ON mb.market_window_id = mw.id
+                   WHERE mb.team_id = $1 AND mw.league_id = $2
+                   ORDER BY mw.id DESC LIMIT 1""",
+                (team_id, team["league_id"]),
+            )
+            if latest_mb:
+                effective_budget = latest_mb[0]["remaining_budget"]
+        except Exception:
+            pass
+
+        # Team fantasy points: sum from ScoringEngine across all matchdays
+        team_total_points = 0
+        try:
+            from src.backend.services.scoring_engine import ScoringEngine
+            md_rows = await db.execute_fetchall(
+                "SELECT id FROM matchdays WHERE status IN ('active','completed')"
+            )
+            for md in md_rows:
+                team_total_points += await ScoringEngine.get_team_matchday_points(team_id, md["id"])
+        except Exception as e:
+            logger.warning("Team points calculation failed: %s", e)
+
         return TeamOut(
             id=team["id"], league_id=team["league_id"],
             owner_nick=team["owner_nick"], team_name=team["team_name"],
-            budget=team["budget"], formation=team["formation"], players=player_list,
+            budget=effective_budget, formation=team["formation"],
+            players=player_list, total_points=team_total_points,
         )
     except HTTPException:
         raise

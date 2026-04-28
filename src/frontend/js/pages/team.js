@@ -33,7 +33,7 @@ Router.register('#/team', async (container) => {
             </div>
             <div class="card text-center">
                 <div style="font-size:.85rem;color:var(--text-secondary)">Puntos totales</div>
-                <div style="font-size:1.5rem;font-weight:700;color:var(--accent-teal)">${team.players.reduce((s,p) => s + (p.total_points || 0), 0)}</div>
+                <div style="font-size:1.5rem;font-weight:700;color:var(--accent-teal)">${team.total_points || 0}</div>
             </div>
             <div class="card text-center">
                 <div style="font-size:.85rem;color:var(--text-secondary)">Valor total</div>

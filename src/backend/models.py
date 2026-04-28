@@ -94,6 +94,7 @@ class TeamOut(BaseModel):
     budget: int
     formation: str
     players: list = Field(default_factory=list)
+    total_points: int = 0
 
 class TeamPlayerOut(BaseModel):
     player_id: str
