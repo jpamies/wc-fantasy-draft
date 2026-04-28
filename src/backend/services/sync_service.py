@@ -212,7 +212,8 @@ async def sync_results() -> dict:
                 # Ensure player exists in local DB (FK to countries)
                 await db.execute(
                     """INSERT INTO players (id, name, country_code, position, market_value)
-                       VALUES ($1, $2, $3, $4, 0)""",
+                       VALUES ($1, $2, $3, $4, 0)
+                       ON CONFLICT (id) DO NOTHING""",
                     (player_id, s.get("player_name", ""), s.get("country_code", ""), position),
                 )
                 
