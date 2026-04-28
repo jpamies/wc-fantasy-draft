@@ -5,7 +5,12 @@ Router.register('#/draft', async (container) => {
     try {
         state = await API.get(`/leagues/${leagueId}/draft`);
     } catch {
-        // No regular draft → check for an active reposition draft window.
+        state = null;
+    }
+
+    // If there's no draft, or the regular draft is already completed, prefer
+    // an active reposition draft window if one exists.
+    if (!state || state.status === 'completed') {
         try {
             const windows = await API.get(`/leagues/${leagueId}/market-windows`);
             const repoWin = (windows || []).find(w => w.status === 'reposition_draft');
@@ -13,8 +18,10 @@ Router.register('#/draft', async (container) => {
                 return await renderRepositionDraft(container, leagueId, repoWin.id);
             }
         } catch {}
-        container.innerHTML = '<div class="card text-center mt-2"><p>No hay draft activo en esta liga.</p></div>';
-        return;
+        if (!state) {
+            container.innerHTML = '<div class="card text-center mt-2"><p>No hay draft activo en esta liga.</p></div>';
+            return;
+        }
     }
 
     let availablePlayers = [];
