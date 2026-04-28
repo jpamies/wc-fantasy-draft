@@ -356,12 +356,14 @@ app.include_router(draft.router)
 app.include_router(market.router)
 app.include_router(scoring.router)
 
-# Serve frontend static files
-frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
-if os.path.isdir(frontend_dir):
-    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
-
 
 @app.get("/api/v1/health")
 async def health():
     return {"status": "ok", "app": "wc-fantasy-2026"}
+
+
+# Serve frontend static files (must be LAST — mount("/") catches everything
+# else, so any @app.get() registered after this would be shadowed and return 404)
+frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
+if os.path.isdir(frontend_dir):
+    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
