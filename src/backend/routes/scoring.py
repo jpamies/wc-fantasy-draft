@@ -96,10 +96,10 @@ async def get_matchday(matchday_id: str):
         scores = await db.execute_fetchall(
             """SELECT ms.*, p.name as player_name, p.position, p.country_code
                FROM match_scores ms JOIN players p ON ms.player_id=p.id
-               WHERE ms.matchday_id=? ORDER BY ms.total_points DESC""",
+               WHERE ms.matchday_id=$1 ORDER BY ms.total_points DESC""",
             (matchday_id,),
         )
-        local_md = await db.execute_fetchall("SELECT status FROM matchdays WHERE id=?", (matchday_id,))
+        local_md = await db.execute_fetchall("SELECT status FROM matchdays WHERE id=$1", (matchday_id,))
     finally:
         await db.close()
 
@@ -124,7 +124,7 @@ async def get_fantasy_points(matchday_id: str, auth: dict = Depends(get_current_
     db = await get_db()
     try:
         teams = await db.execute_fetchall(
-            "SELECT id, team_name, owner_nick, display_name FROM fantasy_teams WHERE league_id=?",
+            "SELECT id, team_name, owner_nick, display_name FROM fantasy_teams WHERE league_id=$1",
             (league_id,),
         )
         results = []
@@ -179,7 +179,7 @@ async def get_leaderboard(auth: dict = Depends(get_current_team)):
     db = await get_db()
     try:
         teams = await db.execute_fetchall(
-            "SELECT id, team_name, owner_nick, display_name FROM fantasy_teams WHERE league_id=?",
+            "SELECT id, team_name, owner_nick, display_name FROM fantasy_teams WHERE league_id=$1",
             (league_id,),
         )
         

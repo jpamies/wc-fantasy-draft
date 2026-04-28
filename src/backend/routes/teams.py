@@ -10,10 +10,10 @@ router = APIRouter(prefix="/api/v1", tags=["teams"])
 async def _ensure_matchday_exists(db, matchday_id: str):
     """Ensure a matchday row exists in the local DB (for FK integrity).
     The calendar lives in the simulator — this just creates a stub if missing."""
-    existing = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=?", (matchday_id,))
+    existing = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=$1", (matchday_id,))
     if not existing:
         await db.execute(
-            "INSERT OR IGNORE INTO matchdays (id, name, date, phase, status) VALUES (?,?,?,?,?)",
+            "INSERT INTO matchdays (id, name, date, phase, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING",
             (matchday_id, matchday_id, "", "groups", "upcoming"),
         )
         await db.commit()
@@ -39,7 +39,7 @@ async def get_team(team_id: str):
 
     db = await get_db()
     try:
-        rows = await db.execute_fetchall("SELECT * FROM fantasy_teams WHERE id=?", (team_id,))
+        rows = await db.execute_fetchall("SELECT * FROM fantasy_teams WHERE id=$1", (team_id,))
         if not rows:
             raise HTTPException(404, "Team not found")
         team = dict(rows[0])
@@ -55,7 +55,7 @@ async def get_team(team_id: str):
                    SELECT player_id, SUM(total_points) as total
                    FROM match_scores GROUP BY player_id
                ) pts ON pts.player_id = tp.player_id
-               WHERE tp.team_id=? ORDER BY tp.is_starter DESC, tp.bench_order ASC""",
+               WHERE tp.team_id=$1 ORDER BY tp.is_starter DESC, tp.bench_order ASC""",
             (team_id,),
         )
         player_list = [
@@ -92,7 +92,7 @@ async def update_lineup(team_id: str, body: LineupUpdate, auth: dict = Depends(g
             raise HTTPException(400, f"Invalid formation. Allowed: {list(FORMATIONS.keys())}")
 
         if body.formation:
-            await db.execute("UPDATE fantasy_teams SET formation=? WHERE id=?", (body.formation, team_id))
+            await db.execute("UPDATE fantasy_teams SET formation=$1 WHERE id=$2", (body.formation, team_id))
 
         if body.starters is not None:
             if len(body.starters) > 11:
@@ -104,35 +104,35 @@ async def update_lineup(team_id: str, body: LineupUpdate, auth: dict = Depends(g
                 starter_rows = await db.execute_fetchall(
                     f"""SELECT tp.player_id, p.position FROM team_players tp
                         JOIN players p ON tp.player_id=p.id
-                        WHERE tp.team_id=? AND tp.player_id IN ({placeholders})""",
+                        WHERE tp.team_id=$1 AND tp.player_id IN ({placeholders})""",
                     [team_id] + body.starters,
                 )
                 if len(starter_rows) != len(body.starters):
                     raise HTTPException(400, "Some players not in your team")
 
             # Reset all, then set starters
-            await db.execute("UPDATE team_players SET is_starter=0 WHERE team_id=?", (team_id,))
+            await db.execute("UPDATE team_players SET is_starter=0 WHERE team_id=$1", (team_id,))
             for pid in body.starters:
-                await db.execute("UPDATE team_players SET is_starter=1 WHERE team_id=? AND player_id=?", (team_id, pid))
+                await db.execute("UPDATE team_players SET is_starter=1 WHERE team_id=$1 AND player_id=$2", (team_id, pid))
 
             # Auto-assign bench order for non-starters
             bench = await db.execute_fetchall(
-                "SELECT player_id FROM team_players WHERE team_id=? AND is_starter=0 ORDER BY player_id",
+                "SELECT player_id FROM team_players WHERE team_id=$1 AND is_starter=0 ORDER BY player_id",
                 (team_id,),
             )
             for i, b in enumerate(bench):
                 await db.execute(
-                    "UPDATE team_players SET bench_order=? WHERE team_id=? AND player_id=?",
+                    "UPDATE team_players SET bench_order=$1 WHERE team_id=$2 AND player_id=$3",
                     (i + 1, team_id, b["player_id"]),
                 )
 
         if body.captain:
-            await db.execute("UPDATE team_players SET is_captain=0 WHERE team_id=?", (team_id,))
-            await db.execute("UPDATE team_players SET is_captain=1 WHERE team_id=? AND player_id=?", (team_id, body.captain))
+            await db.execute("UPDATE team_players SET is_captain=0 WHERE team_id=$1", (team_id,))
+            await db.execute("UPDATE team_players SET is_captain=1 WHERE team_id=$1 AND player_id=$2", (team_id, body.captain))
 
         if body.vice_captain:
-            await db.execute("UPDATE team_players SET is_vice_captain=0 WHERE team_id=?", (team_id,))
-            await db.execute("UPDATE team_players SET is_vice_captain=1 WHERE team_id=? AND player_id=?", (team_id, body.vice_captain))
+            await db.execute("UPDATE team_players SET is_vice_captain=0 WHERE team_id=$1", (team_id,))
+            await db.execute("UPDATE team_players SET is_vice_captain=1 WHERE team_id=$1 AND player_id=$2", (team_id, body.vice_captain))
 
         await db.commit()
         return {"ok": True}
@@ -155,7 +155,7 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
     try:
         # Check if matchday lineup exists
         existing = await db.execute_fetchall(
-            "SELECT COUNT(*) as cnt FROM matchday_lineups WHERE team_id=? AND matchday_id=?",
+            "SELECT COUNT(*) as cnt FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2",
             (team_id, matchday_id),
         )
         if existing[0]["cnt"] == 0:
@@ -163,13 +163,13 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
             await _ensure_matchday_exists(db, matchday_id)
             # Copy from default team_players
             defaults = await db.execute_fetchall(
-                "SELECT player_id, is_starter, is_captain, is_vice_captain FROM team_players WHERE team_id=?",
+                "SELECT player_id, is_starter, is_captain, is_vice_captain FROM team_players WHERE team_id=$1",
                 (team_id,),
             )
             for d in defaults:
                 d = dict(d)
                 await db.execute(
-                    "INSERT INTO matchday_lineups (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO matchday_lineups (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain) VALUES ($1,$2,$3,$4,$5,$6)",
                     (team_id, matchday_id, d["player_id"], d["is_starter"], d["is_captain"], d["is_vice_captain"]),
                 )
             await db.commit()
@@ -203,9 +203,9 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
                           SUM(yellow_cards) as md_yellow,
                           MAX(red_card) as md_red,
                           SUM(minutes_played) as md_minutes
-                   FROM match_scores WHERE matchday_id=? GROUP BY player_id
+                   FROM match_scores WHERE matchday_id=$1 GROUP BY player_id
                ) pts_md ON pts_md.player_id = ml.player_id
-               WHERE ml.team_id=? AND ml.matchday_id=?
+               WHERE ml.team_id=$2 AND ml.matchday_id=$3
                ORDER BY ml.is_starter DESC""",
             (matchday_id, team_id, matchday_id),
         )
@@ -216,7 +216,7 @@ async def get_matchday_lineup(team_id: str, matchday_id: str, auth: dict = Depen
         played_countries = await _get_played_countries(matchday_id)
         
         matches = await db.execute_fetchall(
-            "SELECT home_country, away_country, status FROM matches WHERE matchday_id=?",
+            "SELECT home_country, away_country, status FROM matches WHERE matchday_id=$1",
             (matchday_id,),
         )
         for m in matches:
@@ -257,7 +257,7 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
     db = await get_db()
     try:
         matches = await db.execute_fetchall(
-            "SELECT home_country, away_country, status FROM matches WHERE matchday_id=?",
+            "SELECT home_country, away_country, status FROM matches WHERE matchday_id=$1",
             (matchday_id,),
         )
         for m in matches:
@@ -270,7 +270,7 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
 
         # Ensure matchday lineup exists
         existing = await db.execute_fetchall(
-            "SELECT COUNT(*) as cnt FROM matchday_lineups WHERE team_id=? AND matchday_id=?",
+            "SELECT COUNT(*) as cnt FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2",
             (team_id, matchday_id),
         )
         if existing[0]["cnt"] == 0:
@@ -278,13 +278,13 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
             await _ensure_matchday_exists(db, matchday_id)
             # Copy defaults first
             defaults = await db.execute_fetchall(
-                "SELECT player_id, is_starter, is_captain, is_vice_captain FROM team_players WHERE team_id=?",
+                "SELECT player_id, is_starter, is_captain, is_vice_captain FROM team_players WHERE team_id=$1",
                 (team_id,),
             )
             for d in defaults:
                 d = dict(d)
                 await db.execute(
-                    "INSERT INTO matchday_lineups (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO matchday_lineups (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain) VALUES ($1,$2,$3,$4,$5,$6)",
                     (team_id, matchday_id, d["player_id"], d["is_starter"], d["is_captain"], d["is_vice_captain"]),
                 )
 
@@ -314,7 +314,7 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
 
             # Validate: can't ADD a locked player as starter (their match started)
             current_starters = await db.execute_fetchall(
-                "SELECT ml.player_id FROM matchday_lineups ml WHERE ml.team_id=? AND ml.matchday_id=? AND ml.is_starter=1",
+                "SELECT ml.player_id FROM matchday_lineups ml WHERE ml.team_id=$1 AND ml.matchday_id=$2 AND ml.is_starter=1",
                 (team_id, matchday_id),
             )
             current_starter_ids = {dict(r)["player_id"] for r in current_starters}
@@ -323,9 +323,9 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
             # Players being promoted from bench to starter
             promoted = new_starters - current_starter_ids
             for pid in promoted:
-                player = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (pid,))
+                player = await db.execute_fetchall("SELECT country_code FROM players WHERE id=$1", (pid,))
                 if player and dict(player[0])["country_code"] in played_countries:
-                    pname = await db.execute_fetchall("SELECT name FROM players WHERE id=?", (pid,))
+                    pname = await db.execute_fetchall("SELECT name FROM players WHERE id=$1", (pid,))
                     name = dict(pname[0])["name"] if pname else pid
                     raise HTTPException(409, f"No puedes titular a {name}: su partido ya ha empezado")
 
@@ -335,29 +335,29 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
 
             # Update lineup
             await db.execute(
-                "UPDATE matchday_lineups SET is_starter=0 WHERE team_id=? AND matchday_id=?",
+                "UPDATE matchday_lineups SET is_starter=0 WHERE team_id=$1 AND matchday_id=$2",
                 (team_id, matchday_id),
             )
             for pid in body.starters:
                 await db.execute(
-                    "UPDATE matchday_lineups SET is_starter=1 WHERE team_id=? AND matchday_id=? AND player_id=?",
+                    "UPDATE matchday_lineups SET is_starter=1 WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3",
                     (team_id, matchday_id, pid),
                 )
 
         if body.captain:
             # Can't set captain if locked
-            cp = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (body.captain,))
+            cp = await db.execute_fetchall("SELECT country_code FROM players WHERE id=$1", (body.captain,))
             if cp and dict(cp[0])["country_code"] in played_countries:
                 raise HTTPException(409, "No puedes cambiar el capitán: su partido ya ha empezado")
-            await db.execute("UPDATE matchday_lineups SET is_captain=0 WHERE team_id=? AND matchday_id=?", (team_id, matchday_id))
-            await db.execute("UPDATE matchday_lineups SET is_captain=1 WHERE team_id=? AND matchday_id=? AND player_id=?", (team_id, matchday_id, body.captain))
+            await db.execute("UPDATE matchday_lineups SET is_captain=0 WHERE team_id=$1 AND matchday_id=$2", (team_id, matchday_id))
+            await db.execute("UPDATE matchday_lineups SET is_captain=1 WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3", (team_id, matchday_id, body.captain))
 
         if body.vice_captain:
-            vcp = await db.execute_fetchall("SELECT country_code FROM players WHERE id=?", (body.vice_captain,))
+            vcp = await db.execute_fetchall("SELECT country_code FROM players WHERE id=$1", (body.vice_captain,))
             if vcp and dict(vcp[0])["country_code"] in played_countries:
                 raise HTTPException(409, "No puedes cambiar el vice-capitán: su partido ya ha empezado")
-            await db.execute("UPDATE matchday_lineups SET is_vice_captain=0 WHERE team_id=? AND matchday_id=?", (team_id, matchday_id))
-            await db.execute("UPDATE matchday_lineups SET is_vice_captain=1 WHERE team_id=? AND matchday_id=? AND player_id=?", (team_id, matchday_id, body.vice_captain))
+            await db.execute("UPDATE matchday_lineups SET is_vice_captain=0 WHERE team_id=$1 AND matchday_id=$2", (team_id, matchday_id))
+            await db.execute("UPDATE matchday_lineups SET is_vice_captain=1 WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3", (team_id, matchday_id, body.vice_captain))
 
         await db.commit()
         return {"ok": True}

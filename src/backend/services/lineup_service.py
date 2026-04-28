@@ -50,32 +50,32 @@ async def ensure_matchday_snapshot(team_id: str, matchday_id: str):
     try:
         # Check if snapshot already exists
         existing = await db.execute_fetchall(
-            "SELECT COUNT(*) as c FROM matchday_lineups WHERE team_id=? AND matchday_id=?",
+            "SELECT COUNT(*) as c FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2",
             (team_id, matchday_id),
         )
         if existing[0]["c"] > 0:
             return  # Already snapshotted
         
         # Ensure matchday row exists for FK integrity
-        md_exists = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=?", (matchday_id,))
+        md_exists = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=$1", (matchday_id,))
         if not md_exists:
             await db.execute(
-                "INSERT OR IGNORE INTO matchdays (id, name, date, phase, status) VALUES (?,?,?,?,?)",
+                "INSERT INTO matchdays (id, name, date, phase, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING",
                 (matchday_id, matchday_id, "", "groups", "upcoming"),
             )
         
         # Create snapshot from current team_players
         players = await db.execute_fetchall(
             """SELECT player_id, is_starter, is_captain, is_vice_captain
-               FROM team_players WHERE team_id=?""",
+               FROM team_players WHERE team_id=$1""",
             (team_id,),
         )
         
         for p in players:
             await db.execute(
-                """INSERT OR IGNORE INTO matchday_lineups
+                """INSERT INTO matchday_lineups
                    (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   VALUES ($1, $2, $3, $4, $5, $6)""",
                 (team_id, matchday_id, p["player_id"],
                  p["is_starter"], p["is_captain"], p["is_vice_captain"]),
             )
@@ -103,7 +103,7 @@ async def get_lineup_status(team_id: str, matchday_id: str) -> dict:
                       p.name, p.position, p.country_code, p.photo, p.strength
                FROM matchday_lineups ml
                JOIN players p ON ml.player_id = p.id
-               WHERE ml.team_id=? AND ml.matchday_id=?""",
+               WHERE ml.team_id=$1 AND ml.matchday_id=$2""",
             (team_id, matchday_id),
         )
         
@@ -114,7 +114,7 @@ async def get_lineup_status(team_id: str, matchday_id: str) -> dict:
                           p.name, p.position, p.country_code, p.photo, p.strength
                    FROM team_players tp
                    JOIN players p ON tp.player_id = p.id
-                   WHERE tp.team_id=?""",
+                   WHERE tp.team_id=$1""",
                 (team_id,),
             )
         
@@ -124,7 +124,7 @@ async def get_lineup_status(team_id: str, matchday_id: str) -> dict:
         if player_ids:
             placeholders = ",".join("?" * len(player_ids))
             score_rows = await db.execute_fetchall(
-                f"SELECT player_id, total_points, minutes_played FROM match_scores WHERE matchday_id=? AND player_id IN ({placeholders})",
+                f"SELECT player_id, total_points, minutes_played FROM match_scores WHERE matchday_id=$1 AND player_id IN ({placeholders})",
                 (matchday_id, *player_ids),
             )
             scores = {s["player_id"]: dict(s) for s in score_rows}
@@ -173,13 +173,13 @@ async def swap_player(team_id: str, matchday_id: str, bench_player_id: str, star
         starter = await db.execute_fetchall(
             """SELECT ml.player_id, ml.is_starter, p.country_code, p.name
                FROM matchday_lineups ml JOIN players p ON ml.player_id = p.id
-               WHERE ml.team_id=? AND ml.matchday_id=? AND ml.player_id=?""",
+               WHERE ml.team_id=$1 AND ml.matchday_id=$2 AND ml.player_id=$3""",
             (team_id, matchday_id, starter_player_id),
         )
         bench = await db.execute_fetchall(
             """SELECT ml.player_id, ml.is_starter, p.country_code, p.name
                FROM matchday_lineups ml JOIN players p ON ml.player_id = p.id
-               WHERE ml.team_id=? AND ml.matchday_id=? AND ml.player_id=?""",
+               WHERE ml.team_id=$1 AND ml.matchday_id=$2 AND ml.player_id=$3""",
             (team_id, matchday_id, bench_player_id),
         )
         
@@ -209,11 +209,11 @@ async def swap_player(team_id: str, matchday_id: str, bench_player_id: str, star
         
         # Execute swap
         await db.execute(
-            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=? AND matchday_id=? AND player_id=?",
+            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3",
             (team_id, matchday_id, starter_player_id),
         )
         await db.execute(
-            "UPDATE matchday_lineups SET is_starter=1 WHERE team_id=? AND matchday_id=? AND player_id=?",
+            "UPDATE matchday_lineups SET is_starter=1 WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3",
             (team_id, matchday_id, bench_player_id),
         )
         await db.commit()

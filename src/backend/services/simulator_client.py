@@ -121,13 +121,24 @@ async def ensure_player_in_db(player_id: str) -> dict | None:
     try:
         # Ensure country exists
         await db.execute(
-            "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
+            "INSERT INTO countries (code, name) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING",
             (player["country_code"], player["country_code"]),
         )
         await db.execute(
-            """INSERT OR REPLACE INTO players
+            """INSERT INTO players
                (id, name, country_code, position, detailed_position, club, club_logo, age, market_value, photo, clause_value)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+               ON CONFLICT (id) DO UPDATE SET
+                   name=EXCLUDED.name,
+                   country_code=EXCLUDED.country_code,
+                   position=EXCLUDED.position,
+                   detailed_position=EXCLUDED.detailed_position,
+                   club=EXCLUDED.club,
+                   club_logo=EXCLUDED.club_logo,
+                   age=EXCLUDED.age,
+                   market_value=EXCLUDED.market_value,
+                   photo=EXCLUDED.photo,
+                   clause_value=EXCLUDED.clause_value""",
             (
                 player["id"], player["name"], player["country_code"],
                 player["position"], player["detailed_position"],
@@ -150,7 +161,7 @@ async def ensure_team_players_in_db(team_id: str):
         rows = await db.execute_fetchall(
             """SELECT tp.player_id FROM team_players tp
                LEFT JOIN players p ON tp.player_id = p.id
-               WHERE tp.team_id = ? AND p.id IS NULL""",
+               WHERE tp.team_id = $1 AND p.id IS NULL""",
             (team_id,),
         )
         missing_ids = [r["player_id"] for r in rows]

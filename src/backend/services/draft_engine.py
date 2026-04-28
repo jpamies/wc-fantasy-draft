@@ -31,7 +31,7 @@ class DraftEngine:
     async def start_draft(league_id: str) -> dict:
         db = await get_db()
         try:
-            league = await db.execute_fetchall("SELECT * FROM leagues WHERE id=?", (league_id,))
+            league = await db.execute_fetchall("SELECT * FROM leagues WHERE id=$1", (league_id,))
             if not league:
                 return {"error": "League not found"}
             league = dict(league[0])
@@ -40,7 +40,7 @@ class DraftEngine:
                 return {"error": f"Cannot start draft in status: {league['status']}"}
 
             teams = await db.execute_fetchall(
-                "SELECT id FROM fantasy_teams WHERE league_id=? ORDER BY created_at", (league_id,)
+                "SELECT id FROM fantasy_teams WHERE league_id=$1 ORDER BY created_at", (league_id,)
             )
             if len(teams) < 2:
                 return {"error": "Need at least 2 teams"}
@@ -53,15 +53,15 @@ class DraftEngine:
             now = datetime.now(timezone.utc).isoformat()
 
             # Remove existing draft if any
-            await db.execute("DELETE FROM draft_picks WHERE draft_id IN (SELECT id FROM drafts WHERE league_id=?)", (league_id,))
-            await db.execute("DELETE FROM drafts WHERE league_id=?", (league_id,))
+            await db.execute("DELETE FROM draft_picks WHERE draft_id IN (SELECT id FROM drafts WHERE league_id=$1)", (league_id,))
+            await db.execute("DELETE FROM drafts WHERE league_id=$1", (league_id,))
 
             await db.execute(
                 """INSERT INTO drafts (id, league_id, status, current_round, current_pick, pick_order, started_at)
-                   VALUES (?,?,?,?,?,?,?)""",
+                   VALUES ($1,$2,$3,$4,$5,$6,$7)""",
                 (draft_id, league_id, "in_progress", 1, 1, json.dumps(team_ids), now),
             )
-            await db.execute("UPDATE leagues SET status='draft_in_progress' WHERE id=?", (league_id,))
+            await db.execute("UPDATE leagues SET status='draft_in_progress' WHERE id=$1", (league_id,))
             await db.commit()
             return {"draft_id": draft_id, "pick_order": team_ids}
         finally:
@@ -71,7 +71,7 @@ class DraftEngine:
     async def get_draft_state(league_id: str) -> dict | None:
         db = await get_db()
         try:
-            drafts = await db.execute_fetchall("SELECT * FROM drafts WHERE league_id=?", (league_id,))
+            drafts = await db.execute_fetchall("SELECT * FROM drafts WHERE league_id=$1", (league_id,))
             if not drafts:
                 return None
             draft = dict(drafts[0])
@@ -83,7 +83,7 @@ class DraftEngine:
                    FROM draft_picks dp
                    JOIN fantasy_teams ft ON dp.team_id=ft.id
                    JOIN players p ON dp.player_id=p.id
-                   WHERE dp.draft_id=? ORDER BY dp.round, dp.pick""",
+                   WHERE dp.draft_id=$1 ORDER BY dp.round, dp.pick""",
                 (draft["id"],),
             )
 
@@ -100,7 +100,7 @@ class DraftEngine:
                 if 0 <= idx < total_teams:
                     current_team_id = snake_order[current_round - 1][idx]
                     # Get team name
-                    t = await db.execute_fetchall("SELECT team_name FROM fantasy_teams WHERE id=?", (current_team_id,))
+                    t = await db.execute_fetchall("SELECT team_name FROM fantasy_teams WHERE id=$1", (current_team_id,))
                     if t:
                         current_team_name = t[0]["team_name"]
 
@@ -140,7 +140,7 @@ class DraftEngine:
     async def make_pick(league_id: str, team_id: str, player_id: str) -> dict:
         db = await get_db()
         try:
-            drafts = await db.execute_fetchall("SELECT * FROM drafts WHERE league_id=?", (league_id,))
+            drafts = await db.execute_fetchall("SELECT * FROM drafts WHERE league_id=$1", (league_id,))
             if not drafts:
                 return {"error": "No draft found"}
             draft = dict(drafts[0])
@@ -163,7 +163,7 @@ class DraftEngine:
 
             # Check player not already picked
             existing = await db.execute_fetchall(
-                "SELECT id FROM draft_picks WHERE draft_id=? AND player_id=?", (draft["id"], player_id)
+                "SELECT id FROM draft_picks WHERE draft_id=$1 AND player_id=$2", (draft["id"], player_id)
             )
             if existing:
                 return {"error": "Player already drafted"}
@@ -174,17 +174,17 @@ class DraftEngine:
                 player_data = await ensure_player_in_db(player_id)
                 if not player_data:
                     return {"error": "Player not found"}
-                player = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
+                player = await db.execute_fetchall("SELECT * FROM players WHERE id=$1", (player_id,))
                 player = dict(player[0])
             else:
-                player = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
+                player = await db.execute_fetchall("SELECT * FROM players WHERE id=$1", (player_id,))
                 if not player:
                     return {"error": "Player not found"}
                 player = dict(player[0])
 
             # Check position minimums won't be violated (max 23 players total)
             team_players = await db.execute_fetchall(
-                "SELECT p.position FROM draft_picks dp JOIN players p ON dp.player_id=p.id WHERE dp.draft_id=? AND dp.team_id=?",
+                "SELECT p.position FROM draft_picks dp JOIN players p ON dp.player_id=p.id WHERE dp.draft_id=$1 AND dp.team_id=$2",
                 (draft["id"], team_id),
             )
             current_count = len(team_players)
@@ -193,13 +193,13 @@ class DraftEngine:
 
             now = datetime.now(timezone.utc).isoformat()
             await db.execute(
-                "INSERT INTO draft_picks (draft_id, round, pick, team_id, player_id, timestamp) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO draft_picks (draft_id, round, pick, team_id, player_id, timestamp) VALUES ($1,$2,$3,$4,$5,$6)",
                 (draft["id"], current_round, current_pick, team_id, player_id, now),
             )
 
             # Add to team_players
             await db.execute(
-                "INSERT OR IGNORE INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES (?,?,?,?)",
+                "INSERT INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES ($1,$2,$3,$4) ON CONFLICT (team_id, player_id) DO NOTHING",
                 (team_id, player_id, "draft", now),
             )
 
@@ -213,10 +213,10 @@ class DraftEngine:
             if next_round > 23:
                 # Draft complete
                 await db.execute(
-                    "UPDATE drafts SET status='completed', current_round=?, current_pick=?, completed_at=? WHERE id=?",
+                    "UPDATE drafts SET status='completed', current_round=$1, current_pick=$2, completed_at=$3 WHERE id=$4",
                     (next_round, next_pick, now, draft["id"]),
                 )
-                await db.execute("UPDATE leagues SET status='active' WHERE id=?", (league_id,))
+                await db.execute("UPDATE leagues SET status='active' WHERE id=$1", (league_id,))
                 # Bots never set their own lineup — give them a sane default 11
                 # so they actually score on every matchday.
                 try:
@@ -226,14 +226,14 @@ class DraftEngine:
                     logging.getLogger("wc-fantasy.draft").warning(f"Failed to auto-lineup bots after draft completion: {e}")
             else:
                 await db.execute(
-                    "UPDATE drafts SET current_round=?, current_pick=? WHERE id=?",
+                    "UPDATE drafts SET current_round=$1, current_pick=$2 WHERE id=$3",
                     (next_round, next_pick, draft["id"]),
                 )
 
             await db.commit()
 
             # Get team name for response
-            t = await db.execute_fetchall("SELECT team_name FROM fantasy_teams WHERE id=?", (team_id,))
+            t = await db.execute_fetchall("SELECT team_name FROM fantasy_teams WHERE id=$1", (team_id,))
 
             return {
                 "ok": True,
@@ -255,12 +255,12 @@ class DraftEngine:
 
         db = await get_db()
         try:
-            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
             if not drafts:
                 return {"error": "No draft found"}
             draft_id = drafts[0]["id"]
 
-            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
+            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=$1", (draft_id,))
             picked_ids = set(p["player_id"] for p in picked)
 
             squad_pool = None
@@ -277,12 +277,12 @@ class DraftEngine:
                     if picked_ids:
                         placeholders = ",".join("?" for _ in picked_ids)
                         candidates = await db.execute_fetchall(
-                            f"SELECT id FROM players WHERE position=? AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
+                            f"SELECT id FROM players WHERE position=$1 AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
                             [pos] + list(picked_ids),
                         )
                     else:
                         candidates = await db.execute_fetchall(
-                            "SELECT id FROM players WHERE position=? ORDER BY market_value DESC LIMIT 1", (pos,)
+                            "SELECT id FROM players WHERE position=$1 ORDER BY market_value DESC LIMIT 1", (pos,)
                         )
                     if candidates:
                         return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
@@ -295,12 +295,12 @@ class DraftEngine:
     async def get_available_players(league_id: str, position: str | None = None, search: str | None = None, country: str | None = None) -> list:
         db = await get_db()
         try:
-            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
             if not drafts:
                 return []
             draft_id = drafts[0]["id"]
 
-            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
+            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=$1", (draft_id,))
             picked_ids = set(p["player_id"] for p in picked)
 
             if _use_simulator:
@@ -325,16 +325,17 @@ class DraftEngine:
 
             where = []
             params: list = []
+            idx = 1
             if picked_ids:
-                placeholders = ",".join("?" for _ in picked_ids)
+                placeholders = ",".join(f"${i+idx}" for i in range(len(picked_ids)))
                 where.append(f"id NOT IN ({placeholders})")
-                params.extend(picked_ids)
+                params.extend(picked_ids); idx += len(picked_ids)
             if position:
-                where.append("position=?")
-                params.append(position)
+                where.append(f"position=${idx}")
+                params.append(position); idx += 1
             if search:
-                where.append("name LIKE ?")
-                params.append(f"%{search}%")
+                where.append(f"name ILIKE ${idx}")
+                params.append(f"%{search}%"); idx += 1
 
             where_sql = f"WHERE {' AND '.join(where)}" if where else ""
             rows = await db.execute_fetchall(
@@ -348,13 +349,13 @@ class DraftEngine:
     async def set_autodraft(league_id: str, team_id: str, enabled: bool):
         db = await get_db()
         try:
-            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
             if not drafts:
                 return
             draft_id = drafts[0]["id"]
             await db.execute(
                 """INSERT INTO draft_settings (draft_id, team_id, autodraft)
-                   VALUES (?, ?, ?)
+                   VALUES ($1, $2, $3)
                    ON CONFLICT(draft_id, team_id) DO UPDATE SET autodraft=excluded.autodraft""",
                 (draft_id, team_id, 1 if enabled else 0),
             )
@@ -369,7 +370,7 @@ class DraftEngine:
             rows = await db.execute_fetchall(
                 """SELECT ds.autodraft FROM draft_settings ds
                    JOIN drafts d ON ds.draft_id = d.id
-                   WHERE d.league_id=? AND ds.team_id=?""",
+                   WHERE d.league_id=$1 AND ds.team_id=$2""",
                 (league_id, team_id),
             )
             return bool(rows and rows[0]["autodraft"])
@@ -383,7 +384,7 @@ class DraftEngine:
             rows = await db.execute_fetchall(
                 """SELECT ds.team_id, ds.autodraft FROM draft_settings ds
                    JOIN drafts d ON ds.draft_id = d.id
-                   WHERE d.league_id=? AND ds.autodraft=1""",
+                   WHERE d.league_id=$1 AND ds.autodraft=1""",
                 (league_id,),
             )
             return {r["team_id"]: True for r in rows}
@@ -402,7 +403,7 @@ class DraftEngine:
         """
         db = await get_db()
         try:
-            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
             if not drafts:
                 return {"error": "No draft found"}
             draft_id = drafts[0]["id"]
@@ -411,7 +412,7 @@ class DraftEngine:
             team_picks = await db.execute_fetchall(
                 """SELECT p.position, COUNT(*) as cnt
                    FROM draft_picks dp JOIN players p ON dp.player_id=p.id
-                   WHERE dp.draft_id=? AND dp.team_id=?
+                   WHERE dp.draft_id=$1 AND dp.team_id=$2
                    GROUP BY p.position""",
                 (draft_id, team_id),
             )
@@ -425,7 +426,7 @@ class DraftEngine:
                 return {"error": "Team already full"}
 
             # Get all picked player IDs in this draft
-            all_picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
+            all_picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=$1", (draft_id,))
             picked_ids = [p["player_id"] for p in all_picked]
 
             # Calculate what positions still need filling
@@ -469,12 +470,12 @@ class DraftEngine:
                     if picked_ids:
                         placeholders = ",".join("?" for _ in picked_ids)
                         candidates = await db.execute_fetchall(
-                            f"SELECT id FROM players WHERE position=? AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
+                            f"SELECT id FROM players WHERE position=$1 AND id NOT IN ({placeholders}) ORDER BY market_value DESC LIMIT 1",
                             [pos] + picked_ids,
                         )
                     else:
                         candidates = await db.execute_fetchall(
-                            "SELECT id FROM players WHERE position=? ORDER BY market_value DESC LIMIT 1", (pos,)
+                            "SELECT id FROM players WHERE position=$1 ORDER BY market_value DESC LIMIT 1", (pos,)
                         )
                     if candidates:
                         return await DraftEngine.make_pick(league_id, team_id, candidates[0]["id"])
@@ -533,7 +534,7 @@ class DraftEngine:
         db = await get_db()
         try:
             rows = await db.execute_fetchall(
-                "SELECT owner_nick FROM fantasy_teams WHERE id=?", (team_id,)
+                "SELECT owner_nick FROM fantasy_teams WHERE id=$1", (team_id,)
             )
             if not rows:
                 return False
@@ -550,7 +551,7 @@ class DraftEngine:
             db = await get_db()
             close = True
         try:
-            rows = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            rows = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
             return rows[0]["id"] if rows else None
         finally:
             if close:
@@ -565,7 +566,7 @@ class DraftEngine:
                 return
             await db.execute(
                 """INSERT INTO draft_settings (draft_id, team_id, queue)
-                   VALUES (?, ?, ?)
+                   VALUES ($1, $2, $3)
                    ON CONFLICT(draft_id, team_id) DO UPDATE SET queue=excluded.queue""",
                 (draft_id, team_id, json.dumps(player_ids)),
             )
@@ -580,7 +581,7 @@ class DraftEngine:
             rows = await db.execute_fetchall(
                 """SELECT ds.queue FROM draft_settings ds
                    JOIN drafts d ON ds.draft_id = d.id
-                   WHERE d.league_id=? AND ds.team_id=?""",
+                   WHERE d.league_id=$1 AND ds.team_id=$2""",
                 (league_id, team_id),
             )
             if rows and rows[0]["queue"]:
@@ -634,12 +635,12 @@ class DraftEngine:
 
         db = await get_db()
         try:
-            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
             if not drafts:
                 return {"error": "No draft found"}
             draft_id = drafts[0]["id"]
 
-            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (draft_id,))
+            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=$1", (draft_id,))
             picked_set = {p["player_id"] for p in picked}
 
             # Find the first queued player that's still available

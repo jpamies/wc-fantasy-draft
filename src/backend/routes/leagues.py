@@ -32,7 +32,7 @@ async def create_league(body: LeagueCreate):
             """INSERT INTO leagues (id, name, code, mode, status, max_teams, initial_budget,
                draft_timer_seconds, max_clausulazos_per_window, auto_substitutions,
                draft_order, captain_multiplier, created_at)
-               VALUES (?,?,?,'draft','setup',?,?,?,?,?,?,?,?)""",
+               VALUES ($1,$2,$3,'draft','setup',$4,$5,$6,$7,$8,$9,$10,$11)""",
             (league_id, body.name, code,
              s.max_teams or 10, s.initial_budget or 500000000,
              s.draft_timer_seconds or 60, s.max_clausulazos_per_window or 2,
@@ -54,14 +54,14 @@ async def create_league(body: LeagueCreate):
 async def join_league(body: AuthJoin):
     db = await get_db()
     try:
-        row = await db.execute_fetchall("SELECT * FROM leagues WHERE code=?", (body.league_code,))
+        row = await db.execute_fetchall("SELECT * FROM leagues WHERE code=$1", (body.league_code,))
         if not row:
             raise HTTPException(404, "League not found")
         league = dict(row[0])
 
         # Check if nickname already taken in this league
         existing = await db.execute_fetchall(
-            "SELECT id FROM fantasy_teams WHERE league_id=? AND owner_nick=?",
+            "SELECT id FROM fantasy_teams WHERE league_id=$1 AND owner_nick=$2",
             (league["id"], body.nickname),
         )
         if existing:
@@ -72,21 +72,21 @@ async def join_league(body: AuthJoin):
             raise HTTPException(409, "League already started — cannot join after draft begins")
 
         # Check team count
-        teams = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM fantasy_teams WHERE league_id=?", (league["id"],))
+        teams = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM fantasy_teams WHERE league_id=$1", (league["id"],))
         if teams[0]["cnt"] >= league["max_teams"]:
             raise HTTPException(409, "League is full")
 
         team_id = f"team-{uuid.uuid4().hex[:8]}"
         now = datetime.now(timezone.utc).isoformat()
         await db.execute(
-            "INSERT INTO fantasy_teams (id, league_id, owner_nick, display_name, team_name, budget, formation, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO fantasy_teams (id, league_id, owner_nick, display_name, team_name, budget, formation, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
             (team_id, league["id"], body.nickname, body.display_name, body.team_name, league["initial_budget"], "4-3-3", now),
         )
 
         # First team becomes commissioner
         is_commissioner = not league["commissioner_team_id"]
         if is_commissioner:
-            await db.execute("UPDATE leagues SET commissioner_team_id=? WHERE id=?", (team_id, league["id"]))
+            await db.execute("UPDATE leagues SET commissioner_team_id=$1 WHERE id=$2", (team_id, league["id"]))
 
         await db.commit()
         token = create_token(team_id, league["id"], is_commissioner)
@@ -102,7 +102,7 @@ async def recover_session(body: AuthRecover):
         rows = await db.execute_fetchall(
             """SELECT ft.id as team_id, ft.league_id, l.commissioner_team_id
                FROM fantasy_teams ft JOIN leagues l ON ft.league_id=l.id
-               WHERE l.code=? AND ft.owner_nick=?""",
+               WHERE l.code=$1 AND ft.owner_nick=$2""",
             (body.league_code, body.nickname),
         )
         if not rows:
@@ -119,11 +119,11 @@ async def recover_session(body: AuthRecover):
 async def get_league(league_id: str):
     db = await get_db()
     try:
-        rows = await db.execute_fetchall("SELECT * FROM leagues WHERE id=?", (league_id,))
+        rows = await db.execute_fetchall("SELECT * FROM leagues WHERE id=$1", (league_id,))
         if not rows:
             raise HTTPException(404, "League not found")
         lg = dict(rows[0])
-        teams = await db.execute_fetchall("SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,))
+        teams = await db.execute_fetchall("SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=$1", (league_id,))
         return LeagueOut(
             id=lg["id"], name=lg["name"], code=lg["code"],
             commissioner_team_id=lg["commissioner_team_id"],
@@ -148,7 +148,7 @@ async def get_standings(league_id: str):
     db = await get_db()
     try:
         teams = await db.execute_fetchall(
-            "SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=?", (league_id,)
+            "SELECT id, owner_nick, display_name, team_name, budget FROM fantasy_teams WHERE league_id=$1", (league_id,)
         )
         matchdays = await db.execute_fetchall(
             "SELECT id FROM matchdays WHERE status IN ('active', 'completed') ORDER BY id"
@@ -184,7 +184,7 @@ async def get_team_lineup_public(league_id: str, team_id: str, matchday_id: str)
     try:
         # Verify team belongs to league
         team = await db.execute_fetchall(
-            "SELECT id FROM fantasy_teams WHERE id=? AND league_id=?", (team_id, league_id)
+            "SELECT id FROM fantasy_teams WHERE id=$1 AND league_id=$2", (team_id, league_id)
         )
         if not team:
             raise HTTPException(404, "Team not found in this league")
@@ -200,8 +200,8 @@ async def get_team_lineup_public(league_id: str, team_id: str, matchday_id: str)
                       COALESCE(ms.minutes_played, 0) as minutes_played
                FROM matchday_lineups ml
                JOIN players p ON ml.player_id = p.id
-               LEFT JOIN match_scores ms ON ms.player_id = ml.player_id AND ms.matchday_id = ?
-               WHERE ml.team_id=? AND ml.matchday_id=?
+               LEFT JOIN match_scores ms ON ms.player_id = ml.player_id AND ms.matchday_id = $1
+               WHERE ml.team_id=$2 AND ml.matchday_id=$3
                ORDER BY ml.is_starter DESC, p.position""",
             (matchday_id, team_id, matchday_id),
         )
@@ -218,8 +218,8 @@ async def get_team_lineup_public(league_id: str, team_id: str, matchday_id: str)
                           COALESCE(ms.minutes_played, 0) as minutes_played
                    FROM team_players tp
                    JOIN players p ON tp.player_id = p.id
-                   LEFT JOIN match_scores ms ON ms.player_id = tp.player_id AND ms.matchday_id = ?
-                   WHERE tp.team_id=?
+                   LEFT JOIN match_scores ms ON ms.player_id = tp.player_id AND ms.matchday_id = $1
+                   WHERE tp.team_id=$2
                    ORDER BY tp.is_starter DESC, p.position""",
                 (matchday_id, team_id),
             )
@@ -236,6 +236,7 @@ async def update_settings(league_id: str, body: LeagueSettings, auth: dict = Dep
     try:
         updates = []
         params = []
+        idx = 1
         for field, col in [
             ("max_teams", "max_teams"), ("initial_budget", "initial_budget"),
             ("draft_timer_seconds", "draft_timer_seconds"),
@@ -244,14 +245,14 @@ async def update_settings(league_id: str, body: LeagueSettings, auth: dict = Dep
         ]:
             val = getattr(body, field, None)
             if val is not None:
-                updates.append(f"{col}=?")
-                params.append(val)
+                updates.append(f"{col}=${idx}")
+                params.append(val); idx += 1
         if body.auto_substitutions is not None:
-            updates.append("auto_substitutions=?")
-            params.append(int(body.auto_substitutions))
+            updates.append(f"auto_substitutions=${idx}")
+            params.append(int(body.auto_substitutions)); idx += 1
         if updates:
             params.append(league_id)
-            await db.execute(f"UPDATE leagues SET {', '.join(updates)} WHERE id=?", params)
+            await db.execute(f"UPDATE leagues SET {', '.join(updates)} WHERE id=${idx}", params)
             await db.commit()
         return {"ok": True}
     finally:
@@ -269,7 +270,7 @@ async def my_leagues(nickname: str):
             """SELECT l.id, l.name, l.code, l.status, ft.id as team_id, ft.team_name,
                       l.commissioner_team_id
                FROM fantasy_teams ft JOIN leagues l ON ft.league_id = l.id
-               WHERE ft.owner_nick = ?
+               WHERE ft.owner_nick = $1
                ORDER BY ft.created_at DESC""",
             (nickname,),
         )
@@ -302,18 +303,18 @@ async def leave_league(league_id: str, auth: dict = Depends(get_current_team)):
         team_id = auth["team_id"]
         # Delete draft picks for this team
         await db.execute(
-            "DELETE FROM draft_picks WHERE team_id=?", (team_id,)
+            "DELETE FROM draft_picks WHERE team_id=$1", (team_id,)
         )
         # Delete transfers involving this team
         await db.execute(
-            "DELETE FROM transfers WHERE from_team_id=? OR to_team_id=?", (team_id, team_id)
+            "DELETE FROM transfers WHERE from_team_id=$1 OR to_team_id=$2", (team_id, team_id)
         )
         # Delete matchday lineups for this team
-        await db.execute("DELETE FROM matchday_lineups WHERE team_id=?", (team_id,))
+        await db.execute("DELETE FROM matchday_lineups WHERE team_id=$1", (team_id,))
         # Delete team's players
-        await db.execute("DELETE FROM team_players WHERE team_id=?", (team_id,))
+        await db.execute("DELETE FROM team_players WHERE team_id=$1", (team_id,))
         # Delete the team
-        await db.execute("DELETE FROM fantasy_teams WHERE id=?", (team_id,))
+        await db.execute("DELETE FROM fantasy_teams WHERE id=$1", (team_id,))
         await db.commit()
         return {"ok": True}
     finally:
@@ -330,28 +331,28 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
     try:
         # Get draft id for this league
         draft_rows = await db.execute_fetchall(
-            "SELECT id FROM drafts WHERE league_id=?", (league_id,)
+            "SELECT id FROM drafts WHERE league_id=$1", (league_id,)
         )
         for d in draft_rows:
-            await db.execute("DELETE FROM draft_settings WHERE draft_id=?", (dict(d)["id"],))
-            await db.execute("DELETE FROM draft_picks WHERE draft_id=?", (dict(d)["id"],))
-        await db.execute("DELETE FROM drafts WHERE league_id=?", (league_id,))
+            await db.execute("DELETE FROM draft_settings WHERE draft_id=$1", (dict(d)["id"],))
+            await db.execute("DELETE FROM draft_picks WHERE draft_id=$1", (dict(d)["id"],))
+        await db.execute("DELETE FROM drafts WHERE league_id=$1", (league_id,))
         # Delete transfers
-        await db.execute("DELETE FROM transfers WHERE league_id=?", (league_id,))
+        await db.execute("DELETE FROM transfers WHERE league_id=$1", (league_id,))
         # Delete matchday lineups for teams in this league
         await db.execute(
-            "DELETE FROM matchday_lineups WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
+            "DELETE FROM matchday_lineups WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=$1)",
             (league_id,),
         )
         # Delete all team players in this league
         await db.execute(
-            "DELETE FROM team_players WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
+            "DELETE FROM team_players WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=$1)",
             (league_id,),
         )
         # Delete all teams
-        await db.execute("DELETE FROM fantasy_teams WHERE league_id=?", (league_id,))
+        await db.execute("DELETE FROM fantasy_teams WHERE league_id=$1", (league_id,))
         # Delete the league
-        await db.execute("DELETE FROM leagues WHERE id=?", (league_id,))
+        await db.execute("DELETE FROM leagues WHERE id=$1", (league_id,))
         await db.commit()
         return {"ok": True}
     finally:
@@ -372,7 +373,7 @@ async def admin_add_bots(league_id: str, body: dict, auth: dict = Depends(get_cu
 
     db = await get_db()
     try:
-        league = await db.execute_fetchall("SELECT status FROM leagues WHERE id=?", (league_id,))
+        league = await db.execute_fetchall("SELECT status FROM leagues WHERE id=$1", (league_id,))
         if not league:
             raise HTTPException(404, "League not found")
         if dict(league[0])["status"] not in ("setup", "draft_pending"):
@@ -420,40 +421,40 @@ async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_te
     from src.backend.services.bot_service import remove_bots
     db = await get_db()
     try:
-        league = await db.execute_fetchall("SELECT * FROM leagues WHERE id=?", (league_id,))
+        league = await db.execute_fetchall("SELECT * FROM leagues WHERE id=$1", (league_id,))
         if not league:
             raise HTTPException(404, "League not found")
         league = dict(league[0])
 
         # 1. Delete drafts and related data
-        draft_rows = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+        draft_rows = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
         for d in draft_rows:
-            await db.execute("DELETE FROM draft_settings WHERE draft_id=?", (dict(d)["id"],))
-            await db.execute("DELETE FROM draft_picks WHERE draft_id=?", (dict(d)["id"],))
-        await db.execute("DELETE FROM drafts WHERE league_id=?", (league_id,))
+            await db.execute("DELETE FROM draft_settings WHERE draft_id=$1", (dict(d)["id"],))
+            await db.execute("DELETE FROM draft_picks WHERE draft_id=$1", (dict(d)["id"],))
+        await db.execute("DELETE FROM drafts WHERE league_id=$1", (league_id,))
 
         # 2. Clear all team players and lineups for this league
         await db.execute(
-            "DELETE FROM matchday_lineups WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
+            "DELETE FROM matchday_lineups WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=$1)",
             (league_id,),
         )
         await db.execute(
-            "DELETE FROM team_players WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=?)",
+            "DELETE FROM team_players WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=$1)",
             (league_id,),
         )
 
         # 3. Clear transfers
-        await db.execute("DELETE FROM transfers WHERE league_id=?", (league_id,))
+        await db.execute("DELETE FROM transfers WHERE league_id=$1", (league_id,))
 
         # 4. Reset budgets for remaining human teams
         await db.execute(
-            "UPDATE fantasy_teams SET budget=? WHERE league_id=? AND owner_nick NOT LIKE 'bot_%'",
+            "UPDATE fantasy_teams SET budget=$1 WHERE league_id=$2 AND owner_nick NOT LIKE 'bot_%'",
             (league["initial_budget"], league_id),
         )
 
         # 5. Remove all bots
         bot_ids = await db.execute_fetchall(
-            "SELECT id FROM fantasy_teams WHERE league_id=? AND owner_nick LIKE 'bot_%'",
+            "SELECT id FROM fantasy_teams WHERE league_id=$1 AND owner_nick LIKE 'bot_%'",
             (league_id,),
         )
         if bot_ids:
@@ -463,7 +464,7 @@ async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_te
 
         # 6. Reset league status
         await db.execute(
-            "UPDATE leagues SET status='setup', transfer_window_open=0 WHERE id=?",
+            "UPDATE leagues SET status='setup', transfer_window_open=0 WHERE id=$1",
             (league_id,),
         )
 

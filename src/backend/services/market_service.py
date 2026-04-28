@@ -33,12 +33,13 @@ class MarketService:
         db = await get_db()
         try:
             now = datetime.now().isoformat()
-            cursor = await db.execute(
+            row = await db.execute_fetchall(
                 """INSERT INTO market_windows 
                    (league_id, phase, market_type, status, clause_window_start, clause_window_end,
                     market_window_start, market_window_end, reposition_draft_start, reposition_draft_end,
                     max_buys, max_sells, initial_budget, protect_budget, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                   RETURNING id""",
                 (
                     league_id, phase, market_type, "pending",
                     clause_window_start, clause_window_end,
@@ -49,7 +50,7 @@ class MarketService:
                 ),
             )
             await db.commit()
-            return {"id": cursor.lastrowid, "status": "pending"}
+            return {"id": row[0]["id"], "status": "pending"}
         except Exception as e:
             logger.error(f"Error creating market window: {e}")
             raise
@@ -59,7 +60,7 @@ class MarketService:
         """Get market window details."""
         db = await get_db()
         result = await db.execute_fetchall(
-            "SELECT * FROM market_windows WHERE id=?", (window_id,)
+            "SELECT * FROM market_windows WHERE id=$1", (window_id,)
         )
         return dict(result[0]) if result else None
 
@@ -80,13 +81,16 @@ class MarketService:
                 "max_buys", "max_sells", "initial_budget", "protect_budget"
             ]
 
-            set_clause = ", ".join([f"{k}=?" for k in updates.keys() if k in allowed_fields])
-            values = [v for k, v in updates.items() if k in allowed_fields]
+            valid_keys = [k for k in updates.keys() if k in allowed_fields]
+            set_parts = [f"{k}=${i+1}" for i, k in enumerate(valid_keys)]
+            values = [updates[k] for k in valid_keys]
+            n = len(values)
+            set_clause = ", ".join(set_parts + [f"updated_at=${n+1}"])
             values.append(datetime.now().isoformat())
             values.append(window_id)
 
             await db.execute(
-                f"UPDATE market_windows SET {set_clause}, updated_at=? WHERE id=?",
+                f"UPDATE market_windows SET {set_clause} WHERE id=${n+2}",
                 values,
             )
             await db.commit()
@@ -101,7 +105,7 @@ class MarketService:
         db = await get_db()
         try:
             await db.execute(
-                "UPDATE market_windows SET status='clause_window', updated_at=? WHERE id=?",
+                "UPDATE market_windows SET status='clause_window', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
             await db.commit()
@@ -120,27 +124,27 @@ class MarketService:
 
             # Transition window
             await db.execute(
-                "UPDATE market_windows SET status='market_open', updated_at=? WHERE id=?",
+                "UPDATE market_windows SET status='market_open', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
 
             # Initialize budgets for all teams in league
             teams = await db.execute_fetchall(
-                "SELECT id FROM fantasy_teams WHERE league_id=?", (league_id,)
+                "SELECT id FROM fantasy_teams WHERE league_id=$1", (league_id,)
             )
 
             for team in teams:
                 team_id = team["id"]
                 # Check if budget already exists (skip if present)
                 existing = await db.execute_fetchall(
-                    "SELECT id FROM market_budgets WHERE market_window_id=? AND team_id=?",
+                    "SELECT id FROM market_budgets WHERE market_window_id=$1 AND team_id=$2",
                     (window_id, team_id),
                 )
                 if not existing:
                     await db.execute(
                         """INSERT INTO market_budgets 
                            (market_window_id, team_id, initial_budget, remaining_budget)
-                           VALUES (?, ?, ?, ?)""",
+                           VALUES ($1, $2, $3, $4)""",
                         (window_id, team_id, window["initial_budget"], window["initial_budget"]),
                     )
 
@@ -156,7 +160,7 @@ class MarketService:
         db = await get_db()
         try:
             await db.execute(
-                "UPDATE market_windows SET status='market_closed', updated_at=? WHERE id=?",
+                "UPDATE market_windows SET status='market_closed', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
             await db.commit()
@@ -186,7 +190,7 @@ class MarketService:
 
             # Delete existing clauses for this team in this window
             await db.execute(
-                "DELETE FROM player_clauses WHERE market_window_id=? AND team_id=?",
+                "DELETE FROM player_clauses WHERE market_window_id=$1 AND team_id=$2",
                 (window_id, team_id),
             )
 
@@ -195,7 +199,7 @@ class MarketService:
                 await db.execute(
                     """INSERT INTO player_clauses 
                        (market_window_id, team_id, player_id, clause_amount, is_blocked, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES ($1, $2, $3, $4, $5, $6, $7)""",
                     (
                         window_id, team_id, clause["player_id"],
                         clause.get("clause_amount", 0), int(clause.get("is_blocked", False)),
@@ -217,7 +221,7 @@ class MarketService:
             """SELECT pc.player_id, p.name, pc.clause_amount, pc.is_blocked
                FROM player_clauses pc
                JOIN players p ON pc.player_id = p.id
-               WHERE pc.market_window_id=? AND pc.team_id=?""",
+               WHERE pc.market_window_id=$1 AND pc.team_id=$2""",
             (window_id, team_id),
         )
         return [dict(c) for c in clauses]
@@ -229,7 +233,7 @@ class MarketService:
         """Get current budget for team in market window."""
         db = await get_db()
         result = await db.execute_fetchall(
-            "SELECT * FROM market_budgets WHERE market_window_id=? AND team_id=?",
+            "SELECT * FROM market_budgets WHERE market_window_id=$1 AND team_id=$2",
             (window_id, team_id),
         )
         if result:
@@ -257,14 +261,14 @@ class MarketService:
             JOIN players p ON tp.player_id = p.id
             LEFT JOIN player_clauses pc ON pc.player_id = tp.player_id 
                 AND pc.team_id = tp.team_id 
-                AND pc.market_window_id = ?
-            WHERE ft.league_id = ?
+                AND pc.market_window_id = $1
+            WHERE ft.league_id = $2
         """
 
         params = [window_id, league_id]
 
         if position:
-            query += " AND p.position = ?"
+            query += " AND p.position = $3"
             params.append(position)
 
         query += " ORDER BY p.market_value DESC"
@@ -283,7 +287,7 @@ class MarketService:
             owner_result = await db.execute_fetchall(
                 """SELECT tp.team_id
                    FROM team_players tp
-                   WHERE tp.player_id = ?""",
+                   WHERE tp.player_id = $1""",
                 (player_id,),
             )
 
@@ -299,7 +303,7 @@ class MarketService:
             clause_result = await db.execute_fetchall(
                 """SELECT clause_amount, is_blocked
                    FROM player_clauses
-                   WHERE market_window_id = ? AND team_id = ? AND player_id = ?""",
+                   WHERE market_window_id = $1 AND team_id = $2 AND player_id = $3""",
                 (window_id, seller_team_id, player_id),
             )
 
@@ -328,39 +332,40 @@ class MarketService:
             try:
                 # Move player
                 await db.execute(
-                    "UPDATE team_players SET team_id = ? WHERE player_id = ? AND team_id = ?",
+                    "UPDATE team_players SET team_id = $1 WHERE player_id = $2 AND team_id = $3",
                     (buyer_team_id, player_id, seller_team_id),
                 )
 
                 # Update budgets
                 await db.execute(
                     """UPDATE market_budgets 
-                       SET spent_on_buys = spent_on_buys + ?,
-                           remaining_budget = remaining_budget - ?,
+                       SET spent_on_buys = spent_on_buys + $1,
+                           remaining_budget = remaining_budget - $2,
                            buys_count = buys_count + 1,
-                           updated_at = ?
-                       WHERE market_window_id = ? AND team_id = ?""",
+                           updated_at = $3
+                       WHERE market_window_id = $4 AND team_id = $5""",
                     (clause_amount, clause_amount, datetime.now().isoformat(), window_id, buyer_team_id),
                 )
 
                 await db.execute(
                     """UPDATE market_budgets 
-                       SET earned_from_sales = earned_from_sales + ?,
-                           remaining_budget = remaining_budget + ?,
+                       SET earned_from_sales = earned_from_sales + $1,
+                           remaining_budget = remaining_budget + $2,
                            sells_count = sells_count + 1,
-                           updated_at = ?
-                       WHERE market_window_id = ? AND team_id = ?""",
+                           updated_at = $3
+                       WHERE market_window_id = $4 AND team_id = $5""",
                     (clause_amount, clause_amount, datetime.now().isoformat(), window_id, seller_team_id),
                 )
 
                 # Record transaction
-                cursor = await db.execute(
+                tx_row = await db.execute_fetchall(
                     """INSERT INTO market_transactions
                        (market_window_id, buyer_team_id, seller_team_id, player_id, clause_amount_paid, status)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
+                       VALUES ($1, $2, $3, $4, $5, $6)
+                       RETURNING id""",
                     (window_id, buyer_team_id, seller_team_id, player_id, clause_amount, "completed"),
                 )
-                tx_id = cursor.lastrowid
+                tx_id = tx_row[0]["id"]
 
                 await db.commit()
             except Exception as tx_err:
@@ -382,13 +387,13 @@ class MarketService:
                       mt.seller_team_id, st.team_name as seller_team_name,
                       mt.player_id, p.name as player_name,
                       mt.clause_amount_paid, mt.transaction_date,
-                      CASE WHEN mt.buyer_team_id = ? THEN 'bought' ELSE 'sold' END as direction
+                      CASE WHEN mt.buyer_team_id = $1 THEN 'bought' ELSE 'sold' END as direction
                FROM market_transactions mt
                JOIN fantasy_teams bt ON mt.buyer_team_id = bt.id
                JOIN fantasy_teams st ON mt.seller_team_id = st.id
                JOIN players p ON mt.player_id = p.id
-               WHERE mt.market_window_id = ? 
-                 AND (mt.buyer_team_id = ? OR mt.seller_team_id = ?)
+               WHERE mt.market_window_id = $2 
+                 AND (mt.buyer_team_id = $3 OR mt.seller_team_id = $4)
                ORDER BY mt.transaction_date DESC""",
             (team_id, window_id, team_id, team_id),
         )
@@ -407,7 +412,7 @@ class MarketService:
                    FROM market_budgets mb
                    JOIN fantasy_teams ft ON mb.team_id = ft.id
                    LEFT JOIN team_players tp ON mb.team_id = tp.team_id
-                   WHERE mb.market_window_id = ?
+                   WHERE mb.market_window_id = $1
                    GROUP BY mb.team_id
                    ORDER BY mb.remaining_budget DESC""",
                 (window_id,),
@@ -430,13 +435,13 @@ class MarketService:
                 await db.execute(
                     """INSERT INTO reposition_draft_picks
                        (market_window_id, team_id, pick_number, is_pass)
-                       VALUES (?, ?, ?, 0)""",
+                       VALUES ($1, $2, $3, 0)""",
                     (window_id, entry["team_id"], pick_num),
                 )
 
             # Update window status
             await db.execute(
-                "UPDATE market_windows SET status='reposition_draft', updated_at=? WHERE id=?",
+                "UPDATE market_windows SET status='reposition_draft', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
 
@@ -467,7 +472,7 @@ class MarketService:
                    LEFT JOIN market_budgets mb ON rdp.market_window_id = mb.market_window_id AND rdp.team_id = mb.team_id
                    LEFT JOIN team_players tp ON rdp.team_id = tp.team_id
                    LEFT JOIN players p ON tp.player_id = p.id
-                   WHERE rdp.market_window_id = ?
+                   WHERE rdp.market_window_id = $1
                    GROUP BY rdp.team_id
                    ORDER BY rdp.pick_number""",
                 (window_id,),
@@ -476,7 +481,7 @@ class MarketService:
             # Find current turn (first team with is_pass=0 and player_id is NULL)
             current_turn = await db.execute_fetchall(
                 """SELECT team_id, pick_number FROM reposition_draft_picks
-                   WHERE market_window_id = ? AND player_id IS NULL AND is_pass = 0
+                   WHERE market_window_id = $1 AND player_id IS NULL AND is_pass = 0
                    ORDER BY pick_number LIMIT 1""",
                 (window_id,),
             )
@@ -488,7 +493,7 @@ class MarketService:
                 """SELECT rdp.pick_number, rdp.player_id, p.name, p.position
                    FROM reposition_draft_picks rdp
                    LEFT JOIN players p ON rdp.player_id = p.id
-                   WHERE rdp.market_window_id = ? AND rdp.team_id = ?
+                   WHERE rdp.market_window_id = $1 AND rdp.team_id = $2
                    ORDER BY rdp.pick_number""",
                 (window_id, team_id),
             )
@@ -499,7 +504,7 @@ class MarketService:
                 """SELECT COUNT(DISTINCT p.id) as cnt FROM players p
                    WHERE p.id NOT IN (
                        SELECT DISTINCT player_id FROM team_players 
-                       WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id = ?)
+                       WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id = $1)
                    )""",
                 (window["league_id"],),
             )
@@ -533,7 +538,7 @@ class MarketService:
                    WHERE p.id NOT IN (
                        SELECT DISTINCT player_id FROM team_players 
                        WHERE team_id IN (
-                           SELECT id FROM fantasy_teams WHERE league_id = ?
+                           SELECT id FROM fantasy_teams WHERE league_id = $1
                        )
                    )
                    ORDER BY p.market_value DESC""",
@@ -554,7 +559,7 @@ class MarketService:
             # Check it's this team's turn
             current_turn = await db.execute_fetchall(
                 """SELECT team_id, pick_number FROM reposition_draft_picks
-                   WHERE market_window_id = ? AND player_id IS NULL AND is_pass = 0
+                   WHERE market_window_id = $1 AND player_id IS NULL AND is_pass = 0
                    ORDER BY pick_number LIMIT 1""",
                 (window_id,),
             )
@@ -567,7 +572,7 @@ class MarketService:
             if player_id:
                 # Validate player exists and is available
                 player = await db.execute_fetchall(
-                    "SELECT id, position FROM players WHERE id=?", (player_id,)
+                    "SELECT id, position FROM players WHERE id=$1", (player_id,)
                 )
                 if not player:
                     return {"success": False, "reason": "Player not found"}
@@ -577,7 +582,7 @@ class MarketService:
                 already = await db.execute_fetchall(
                     """SELECT tp.id FROM team_players tp
                        JOIN fantasy_teams ft ON tp.team_id = ft.id
-                       WHERE tp.player_id = ? AND ft.league_id = ?""",
+                       WHERE tp.player_id = $1 AND ft.league_id = $2""",
                     (player_id, window["league_id"]),
                 )
                 if already:
@@ -585,25 +590,25 @@ class MarketService:
 
                 # Update pick
                 await db.execute(
-                    "UPDATE reposition_draft_picks SET player_id=? WHERE market_window_id=? AND team_id=? AND pick_number=?",
+                    "UPDATE reposition_draft_picks SET player_id=$1 WHERE market_window_id=$2 AND team_id=$3 AND pick_number=$4",
                     (player_id, window_id, team_id, pick_number),
                 )
 
                 # Move player to team
                 existing = await db.execute_fetchall(
-                    "SELECT id FROM team_players WHERE team_id=? AND player_id=?",
+                    "SELECT id FROM team_players WHERE team_id=$1 AND player_id=$2",
                     (team_id, player_id),
                 )
                 if not existing:
                     await db.execute(
                         """INSERT INTO team_players (team_id, player_id, acquired_via, acquired_at, market_window_acquired)
-                           VALUES (?, ?, ?, ?, ?)""",
+                           VALUES ($1, $2, $3, $4, $5)""",
                         (team_id, player_id, "free_market", datetime.now().isoformat(), window_id),
                     )
 
                 # If team still has <23 players, append a new pick row at end of queue
                 count_row = await db.execute_fetchall(
-                    "SELECT COUNT(*) as cnt FROM team_players WHERE team_id=?",
+                    "SELECT COUNT(*) as cnt FROM team_players WHERE team_id=$1",
                     (team_id,),
                 )
                 player_count = count_row[0]["cnt"]
@@ -611,20 +616,20 @@ class MarketService:
                 if player_count < 23:
                     # Find max pick_number to append
                     max_row = await db.execute_fetchall(
-                        "SELECT MAX(pick_number) as mx FROM reposition_draft_picks WHERE market_window_id=?",
+                        "SELECT MAX(pick_number) as mx FROM reposition_draft_picks WHERE market_window_id=$1",
                         (window_id,),
                     )
                     next_num = (max_row[0]["mx"] or 0) + 1
                     await db.execute(
                         """INSERT INTO reposition_draft_picks
                            (market_window_id, team_id, pick_number, is_pass)
-                           VALUES (?, ?, ?, 0)""",
+                           VALUES ($1, $2, $3, 0)""",
                         (window_id, team_id, next_num),
                     )
             else:
                 # Pass turn — team is out of the draft
                 await db.execute(
-                    "UPDATE reposition_draft_picks SET is_pass=1 WHERE market_window_id=? AND team_id=? AND pick_number=?",
+                    "UPDATE reposition_draft_picks SET is_pass=1 WHERE market_window_id=$1 AND team_id=$2 AND pick_number=$3",
                     (window_id, team_id, pick_number),
                 )
 

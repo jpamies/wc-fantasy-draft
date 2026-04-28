@@ -28,7 +28,7 @@ async def list_market_windows(
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            "SELECT * FROM market_windows WHERE league_id=? ORDER BY created_at DESC",
+            "SELECT * FROM market_windows WHERE league_id=$1 ORDER BY created_at DESC",
             (league_id,),
         )
         return [dict(r) for r in rows]
@@ -144,7 +144,7 @@ async def market_tick(
     db = await get_db()
     try:
         windows = await db.execute_fetchall(
-            "SELECT * FROM market_windows WHERE league_id=? AND status != 'completed'",
+            "SELECT * FROM market_windows WHERE league_id=$1 AND status != 'completed'",
             (league_id,),
         )
     finally:
@@ -192,7 +192,7 @@ async def rewind_to_clause(
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            "SELECT * FROM market_windows WHERE id=? AND league_id=?",
+            "SELECT * FROM market_windows WHERE id=$1 AND league_id=$2",
             (window_id, league_id),
         )
         if not rows:
@@ -201,7 +201,7 @@ async def rewind_to_clause(
 
         # Wipe reposition draft picks (no transactions made yet at clause phase)
         await db.execute(
-            "DELETE FROM reposition_draft_picks WHERE market_window_id=?",
+            "DELETE FROM reposition_draft_picks WHERE market_window_id=$1",
             (window_id,),
         )
 
@@ -215,12 +215,12 @@ async def rewind_to_clause(
         await db.execute(
             """UPDATE market_windows
                SET status='clause_window',
-                   clause_window_end=?,
-                   market_window_end=?,
-                   reposition_draft_start=?,
-                   reposition_draft_end=?,
-                   updated_at=?
-               WHERE id=?""",
+                   clause_window_end=$1,
+                   market_window_end=$2,
+                   reposition_draft_start=$3,
+                   reposition_draft_end=$4,
+                   updated_at=$5
+               WHERE id=$6""",
             (new_clause_end, new_market_end, new_repo_start, new_repo_end, now.isoformat(), window_id),
         )
         await db.commit()

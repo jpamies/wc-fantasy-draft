@@ -12,7 +12,7 @@ class MarketEngine:
         db = await get_db()
         try:
             # Check window open
-            lg = await db.execute_fetchall("SELECT * FROM leagues WHERE id=?", (league_id,))
+            lg = await db.execute_fetchall("SELECT * FROM leagues WHERE id=$1", (league_id,))
             if not lg or not lg[0]["transfer_window_open"]:
                 return {"error": "Transfer window is closed"}
 
@@ -22,7 +22,7 @@ class MarketEngine:
                    FROM team_players tp
                    JOIN fantasy_teams ft ON tp.team_id=ft.id
                    JOIN players p ON tp.player_id=p.id
-                   WHERE tp.player_id=? AND ft.league_id=?""",
+                   WHERE tp.player_id=$1 AND ft.league_id=$2""",
                 (player_id, league_id),
             )
             if not owner:
@@ -36,7 +36,7 @@ class MarketEngine:
             clause_value = owner["clause_value"]
 
             # Check buyer budget
-            buyer = await db.execute_fetchall("SELECT budget FROM fantasy_teams WHERE id=?", (buyer_team_id,))
+            buyer = await db.execute_fetchall("SELECT budget FROM fantasy_teams WHERE id=$1", (buyer_team_id,))
             if not buyer or buyer[0]["budget"] < clause_value:
                 return {"error": "Insufficient budget"}
 
@@ -44,7 +44,7 @@ class MarketEngine:
             max_clauses = lg[0]["max_clausulazos_per_window"]
             used = await db.execute_fetchall(
                 """SELECT COUNT(*) as cnt FROM transfers
-                   WHERE league_id=? AND to_team_id=? AND type='clause' AND status='completed'""",
+                   WHERE league_id=$1 AND to_team_id=$2 AND type='clause' AND status='completed'""",
                 (league_id, buyer_team_id),
             )
             if used[0]["cnt"] >= max_clauses:
@@ -52,7 +52,7 @@ class MarketEngine:
 
             # Check player wasn't already clausulado this window
             already = await db.execute_fetchall(
-                "SELECT id FROM transfers WHERE league_id=? AND player_id=? AND type='clause' AND status='completed'",
+                "SELECT id FROM transfers WHERE league_id=$1 AND player_id=$2 AND type='clause' AND status='completed'",
                 (league_id, player_id),
             )
             if already:
@@ -62,17 +62,17 @@ class MarketEngine:
             transfer_id = f"xfer-{uuid.uuid4().hex[:8]}"
 
             # Execute transfer
-            await db.execute("DELETE FROM team_players WHERE team_id=? AND player_id=?", (seller_team_id, player_id))
+            await db.execute("DELETE FROM team_players WHERE team_id=$1 AND player_id=$2", (seller_team_id, player_id))
             await db.execute(
-                "INSERT INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES (?,?,?,?)",
+                "INSERT INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES ($1,$2,$3,$4) ON CONFLICT (team_id, player_id) DO NOTHING",
                 (buyer_team_id, player_id, "clause", now),
             )
-            await db.execute("UPDATE fantasy_teams SET budget=budget-? WHERE id=?", (clause_value, buyer_team_id))
-            await db.execute("UPDATE fantasy_teams SET budget=budget+? WHERE id=?", (clause_value, seller_team_id))
+            await db.execute("UPDATE fantasy_teams SET budget=budget-$1 WHERE id=$2", (clause_value, buyer_team_id))
+            await db.execute("UPDATE fantasy_teams SET budget=budget+$1 WHERE id=$2", (clause_value, seller_team_id))
 
             await db.execute(
                 """INSERT INTO transfers (id, league_id, type, from_team_id, to_team_id, player_id, amount, status, created_at, resolved_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)""",
                 (transfer_id, league_id, "clause", seller_team_id, buyer_team_id, player_id, clause_value, "completed", now, now),
             )
             await db.commit()
@@ -85,7 +85,7 @@ class MarketEngine:
                            players_offered: list[str], players_requested: list[str], amount: int) -> dict:
         db = await get_db()
         try:
-            lg = await db.execute_fetchall("SELECT transfer_window_open FROM leagues WHERE id=?", (league_id,))
+            lg = await db.execute_fetchall("SELECT transfer_window_open FROM leagues WHERE id=$1", (league_id,))
             if not lg or not lg[0]["transfer_window_open"]:
                 return {"error": "Transfer window is closed"}
 
@@ -95,7 +95,7 @@ class MarketEngine:
             await db.execute(
                 """INSERT INTO transfers (id, league_id, type, from_team_id, to_team_id, player_id,
                    players_offered, amount, status, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)""",
                 (offer_id, league_id, "offer", from_team_id, to_team_id,
                  players_requested[0] if players_requested else "",
                  json.dumps({"offered": players_offered, "requested": players_requested}),
@@ -110,7 +110,7 @@ class MarketEngine:
     async def respond_offer(offer_id: str, team_id: str, action: str) -> dict:
         db = await get_db()
         try:
-            rows = await db.execute_fetchall("SELECT * FROM transfers WHERE id=?", (offer_id,))
+            rows = await db.execute_fetchall("SELECT * FROM transfers WHERE id=$1", (offer_id,))
             if not rows:
                 return {"error": "Offer not found"}
             offer = dict(rows[0])
@@ -129,26 +129,26 @@ class MarketEngine:
 
                 # Move requested players from to_team to from_team
                 for pid in requested:
-                    await db.execute("DELETE FROM team_players WHERE team_id=? AND player_id=?", (offer["to_team_id"], pid))
+                    await db.execute("DELETE FROM team_players WHERE team_id=$1 AND player_id=$2", (offer["to_team_id"], pid))
                     await db.execute(
-                        "INSERT OR IGNORE INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES (?,?,?,?)",
+                        "INSERT INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES ($1,$2,$3,$4) ON CONFLICT (team_id, player_id) DO NOTHING",
                         (offer["from_team_id"], pid, "transfer", now),
                     )
                 # Move offered players from from_team to to_team
                 for pid in offered:
-                    await db.execute("DELETE FROM team_players WHERE team_id=? AND player_id=?", (offer["from_team_id"], pid))
+                    await db.execute("DELETE FROM team_players WHERE team_id=$1 AND player_id=$2", (offer["from_team_id"], pid))
                     await db.execute(
-                        "INSERT OR IGNORE INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES (?,?,?,?)",
+                        "INSERT INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES ($1,$2,$3,$4) ON CONFLICT (team_id, player_id) DO NOTHING",
                         (offer["to_team_id"], pid, "transfer", now),
                     )
                 # Transfer money
                 if offer["amount"] > 0:
-                    await db.execute("UPDATE fantasy_teams SET budget=budget-? WHERE id=?", (offer["amount"], offer["from_team_id"]))
-                    await db.execute("UPDATE fantasy_teams SET budget=budget+? WHERE id=?", (offer["amount"], offer["to_team_id"]))
+                    await db.execute("UPDATE fantasy_teams SET budget=budget-$1 WHERE id=$2", (offer["amount"], offer["from_team_id"]))
+                    await db.execute("UPDATE fantasy_teams SET budget=budget+$1 WHERE id=$2", (offer["amount"], offer["to_team_id"]))
 
-                await db.execute("UPDATE transfers SET status='completed', resolved_at=? WHERE id=?", (now, offer_id))
+                await db.execute("UPDATE transfers SET status='completed', resolved_at=$1 WHERE id=$2", (now, offer_id))
             elif action == "reject":
-                await db.execute("UPDATE transfers SET status='rejected', resolved_at=? WHERE id=?", (now, offer_id))
+                await db.execute("UPDATE transfers SET status='rejected', resolved_at=$1 WHERE id=$2", (now, offer_id))
             else:
                 return {"error": "Invalid action (accept or reject)"}
 
@@ -163,7 +163,7 @@ class MarketEngine:
         try:
             # Verify ownership
             tp = await db.execute_fetchall(
-                "SELECT tp.*, p.market_value, p.name FROM team_players tp JOIN players p ON tp.player_id=p.id WHERE tp.team_id=? AND tp.player_id=?",
+                "SELECT tp.*, p.market_value, p.name FROM team_players tp JOIN players p ON tp.player_id=p.id WHERE tp.team_id=$1 AND tp.player_id=$2",
                 (team_id, player_id),
             )
             if not tp:
@@ -171,13 +171,13 @@ class MarketEngine:
             refund = tp[0]["market_value"] // 2
 
             now = datetime.now(timezone.utc).isoformat()
-            await db.execute("DELETE FROM team_players WHERE team_id=? AND player_id=?", (team_id, player_id))
-            await db.execute("UPDATE fantasy_teams SET budget=budget+? WHERE id=?", (refund, team_id))
+            await db.execute("DELETE FROM team_players WHERE team_id=$1 AND player_id=$2", (team_id, player_id))
+            await db.execute("UPDATE fantasy_teams SET budget=budget+$1 WHERE id=$2", (refund, team_id))
 
             xfer_id = f"xfer-{uuid.uuid4().hex[:8]}"
             await db.execute(
                 """INSERT INTO transfers (id, league_id, type, from_team_id, player_id, amount, status, created_at, resolved_at)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
                 (xfer_id, league_id, "release", team_id, player_id, refund, "completed", now, now),
             )
             await db.commit()
@@ -189,7 +189,7 @@ class MarketEngine:
     async def bid_free_agent(league_id: str, team_id: str, player_id: str, amount: int) -> dict:
         db = await get_db()
         try:
-            lg = await db.execute_fetchall("SELECT transfer_window_open FROM leagues WHERE id=?", (league_id,))
+            lg = await db.execute_fetchall("SELECT transfer_window_open FROM leagues WHERE id=$1", (league_id,))
             if not lg or not lg[0]["transfer_window_open"]:
                 return {"error": "Transfer window is closed"}
 
@@ -197,13 +197,13 @@ class MarketEngine:
             owned = await db.execute_fetchall(
                 """SELECT tp.team_id FROM team_players tp
                    JOIN fantasy_teams ft ON tp.team_id=ft.id
-                   WHERE tp.player_id=? AND ft.league_id=?""",
+                   WHERE tp.player_id=$1 AND ft.league_id=$2""",
                 (player_id, league_id),
             )
             if owned:
                 return {"error": "Player is not a free agent"}
 
-            buyer = await db.execute_fetchall("SELECT budget FROM fantasy_teams WHERE id=?", (team_id,))
+            buyer = await db.execute_fetchall("SELECT budget FROM fantasy_teams WHERE id=$1", (team_id,))
             if not buyer or buyer[0]["budget"] < amount:
                 return {"error": "Insufficient budget"}
 
@@ -211,7 +211,7 @@ class MarketEngine:
             bid_id = f"xfer-{uuid.uuid4().hex[:8]}"
             await db.execute(
                 """INSERT INTO transfers (id, league_id, type, to_team_id, player_id, amount, status, created_at)
-                   VALUES (?,?,?,?,?,?,?,?)""",
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
                 (bid_id, league_id, "free_market", team_id, player_id, amount, "pending", now),
             )
             await db.commit()
@@ -225,7 +225,7 @@ class MarketEngine:
         db = await get_db()
         try:
             pending = await db.execute_fetchall(
-                "SELECT * FROM transfers WHERE league_id=? AND type='free_market' AND status='pending' ORDER BY player_id, amount DESC",
+                "SELECT * FROM transfers WHERE league_id=$1 AND type='free_market' AND status='pending' ORDER BY player_id, amount DESC",
                 (league_id,),
             )
             now = datetime.now(timezone.utc).isoformat()
@@ -235,14 +235,14 @@ class MarketEngine:
             for bid in pending:
                 bid = dict(bid)
                 if bid["player_id"] in seen_players:
-                    await db.execute("UPDATE transfers SET status='rejected', resolved_at=? WHERE id=?", (now, bid["id"]))
+                    await db.execute("UPDATE transfers SET status='rejected', resolved_at=$1 WHERE id=$2", (now, bid["id"]))
                     continue
 
                 seen_players.add(bid["player_id"])
                 team_id = bid["to_team_id"]
 
                 # Check budget still sufficient
-                buyer = await db.execute_fetchall("SELECT budget FROM fantasy_teams WHERE id=?", (team_id,))
+                buyer = await db.execute_fetchall("SELECT budget FROM fantasy_teams WHERE id=$1", (team_id,))
                 if buyer and buyer[0]["budget"] >= bid["amount"]:
                     # Ensure player exists in local DB (for FK integrity when using simulator)
                     from src.backend.config import settings
@@ -250,14 +250,14 @@ class MarketEngine:
                         from src.backend.services.simulator_client import ensure_player_in_db
                         await ensure_player_in_db(bid["player_id"])
                     await db.execute(
-                        "INSERT OR IGNORE INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES (?,?,?,?)",
+                        "INSERT INTO team_players (team_id, player_id, acquired_via, acquired_at) VALUES ($1,$2,$3,$4) ON CONFLICT (team_id, player_id) DO NOTHING",
                         (team_id, bid["player_id"], "free_market", now),
                     )
-                    await db.execute("UPDATE fantasy_teams SET budget=budget-? WHERE id=?", (bid["amount"], team_id))
-                    await db.execute("UPDATE transfers SET status='completed', resolved_at=? WHERE id=?", (now, bid["id"]))
+                    await db.execute("UPDATE fantasy_teams SET budget=budget-$1 WHERE id=$2", (bid["amount"], team_id))
+                    await db.execute("UPDATE transfers SET status='completed', resolved_at=$1 WHERE id=$2", (now, bid["id"]))
                     resolved.append(bid)
                 else:
-                    await db.execute("UPDATE transfers SET status='rejected', resolved_at=? WHERE id=?", (now, bid["id"]))
+                    await db.execute("UPDATE transfers SET status='rejected', resolved_at=$1 WHERE id=$2", (now, bid["id"]))
 
             await db.commit()
             return resolved
@@ -270,7 +270,7 @@ class MarketEngine:
         try:
             owned = await db.execute_fetchall(
                 """SELECT DISTINCT tp.player_id FROM team_players tp
-                   JOIN fantasy_teams ft ON tp.team_id=ft.id WHERE ft.league_id=?""",
+                   JOIN fantasy_teams ft ON tp.team_id=ft.id WHERE ft.league_id=$1""",
                 (league_id,),
             )
             owned_ids = set(r["player_id"] for r in owned)

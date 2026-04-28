@@ -66,7 +66,7 @@ class ScoringEngine:
         db = await get_db()
         try:
             # Get match to determine clean sheets
-            match_row = await db.execute_fetchall("SELECT * FROM matches WHERE id=?", (match_id,))
+            match_row = await db.execute_fetchall("SELECT * FROM matches WHERE id=$1", (match_id,))
             match_info = dict(match_row[0]) if match_row else {}
 
             home_conceded = match_info.get("score_away", 0) or 0
@@ -75,7 +75,7 @@ class ScoringEngine:
             results = []
             for entry in scores:
                 player_rows = await db.execute_fetchall(
-                    "SELECT position, country_code FROM players WHERE id=?", (entry["player_id"],)
+                    "SELECT position, country_code FROM players WHERE id=$1", (entry["player_id"],)
                 )
                 if not player_rows:
                     continue
@@ -104,11 +104,26 @@ class ScoringEngine:
                 )
 
                 await db.execute(
-                    """INSERT OR REPLACE INTO match_scores
+                    """INSERT INTO match_scores
                        (player_id, matchday_id, match_id, minutes_played, goals, assists,
                         clean_sheet, yellow_cards, red_card, own_goals, penalties_missed,
                         penalties_saved, saves, goals_conceded, rating, total_points)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                       ON CONFLICT (player_id, matchday_id) DO UPDATE SET
+                           match_id=EXCLUDED.match_id,
+                           minutes_played=EXCLUDED.minutes_played,
+                           goals=EXCLUDED.goals,
+                           assists=EXCLUDED.assists,
+                           clean_sheet=EXCLUDED.clean_sheet,
+                           yellow_cards=EXCLUDED.yellow_cards,
+                           red_card=EXCLUDED.red_card,
+                           own_goals=EXCLUDED.own_goals,
+                           penalties_missed=EXCLUDED.penalties_missed,
+                           penalties_saved=EXCLUDED.penalties_saved,
+                           saves=EXCLUDED.saves,
+                           goals_conceded=EXCLUDED.goals_conceded,
+                           rating=EXCLUDED.rating,
+                           total_points=EXCLUDED.total_points""",
                     (entry["player_id"], matchday_id, match_id,
                      entry.get("minutes_played", 0), entry.get("goals", 0), entry.get("assists", 0),
                      int(clean_sheet), entry.get("yellow_cards", 0), int(entry.get("red_card", False)),
@@ -133,7 +148,7 @@ class ScoringEngine:
             league_row = await db.execute_fetchall(
                 """SELECT l.auto_substitutions FROM fantasy_teams ft
                    JOIN leagues l ON ft.league_id = l.id
-                   WHERE ft.id=?""",
+                   WHERE ft.id=$1""",
                 (team_id,),
             )
             auto_subs_enabled = league_row[0]["auto_substitutions"] if league_row else 0
@@ -143,7 +158,7 @@ class ScoringEngine:
                 """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain,
                           p.position
                    FROM matchday_lineups ml JOIN players p ON ml.player_id = p.id
-                   WHERE ml.team_id=? AND ml.matchday_id=?""",
+                   WHERE ml.team_id=$1 AND ml.matchday_id=$2""",
                 (team_id, matchday_id),
             )
             if not roster:
@@ -152,7 +167,7 @@ class ScoringEngine:
                     """SELECT tp.player_id, tp.is_starter, tp.is_captain, tp.is_vice_captain,
                               p.position
                        FROM team_players tp JOIN players p ON tp.player_id = p.id
-                       WHERE tp.team_id=?""",
+                       WHERE tp.team_id=$1""",
                     (team_id,),
                 )
             starters = [dict(r) for r in roster if r["is_starter"]]
@@ -164,7 +179,7 @@ class ScoringEngine:
                 return 0
             placeholders = ",".join("?" * len(player_ids))
             scores = await db.execute_fetchall(
-                f"SELECT player_id, total_points, minutes_played FROM match_scores WHERE matchday_id=? AND player_id IN ({placeholders})",
+                f"SELECT player_id, total_points, minutes_played FROM match_scores WHERE matchday_id=$1 AND player_id IN ({placeholders})",
                 (matchday_id, *player_ids),
             )
             score_map = {dict(s)["player_id"]: dict(s) for s in scores}

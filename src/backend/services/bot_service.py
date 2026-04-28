@@ -35,14 +35,14 @@ async def create_bots(league_id: str, count: int) -> list[dict]:
     db = await get_db()
     try:
         # Get league info
-        league = await db.execute_fetchall("SELECT * FROM leagues WHERE id=?", (league_id,))
+        league = await db.execute_fetchall("SELECT * FROM leagues WHERE id=$1", (league_id,))
         if not league:
             return []
         league = dict(league[0])
 
         # Count existing teams
         existing = await db.execute_fetchall(
-            "SELECT COUNT(*) as cnt FROM fantasy_teams WHERE league_id=?", (league_id,)
+            "SELECT COUNT(*) as cnt FROM fantasy_teams WHERE league_id=$1", (league_id,)
         )
         current_count = existing[0]["cnt"]
         available_slots = league["max_teams"] - current_count
@@ -52,7 +52,7 @@ async def create_bots(league_id: str, count: int) -> list[dict]:
 
         # Get already-used bot names in this league
         used = await db.execute_fetchall(
-            "SELECT owner_nick FROM fantasy_teams WHERE league_id=? AND owner_nick LIKE 'bot_%'",
+            "SELECT owner_nick FROM fantasy_teams WHERE league_id=$1 AND owner_nick LIKE 'bot_%'",
             (league_id,),
         )
         used_nicks = {r["owner_nick"] for r in used}
@@ -72,7 +72,7 @@ async def create_bots(league_id: str, count: int) -> list[dict]:
             await db.execute(
                 """INSERT INTO fantasy_teams
                    (id, league_id, owner_nick, display_name, team_name, budget, formation, created_at)
-                   VALUES (?,?,?,?,?,?,?,?)""",
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
                 (team_id, league_id, bot_nick, nick, team_name,
                  league["initial_budget"], "4-3-3", now),
             )
@@ -91,11 +91,11 @@ async def enable_autodraft_for_bots(league_id: str):
     db = await get_db()
     try:
         bots = await db.execute_fetchall(
-            "SELECT ft.id FROM fantasy_teams ft WHERE ft.league_id=? AND ft.owner_nick LIKE 'bot_%'",
+            "SELECT ft.id FROM fantasy_teams ft WHERE ft.league_id=$1 AND ft.owner_nick LIKE 'bot_%'",
             (league_id,),
         )
         draft = await db.execute_fetchall(
-            "SELECT id FROM drafts WHERE league_id=? AND status='in_progress'",
+            "SELECT id FROM drafts WHERE league_id=$1 AND status='in_progress'",
             (league_id,),
         )
         if not draft:
@@ -106,7 +106,7 @@ async def enable_autodraft_for_bots(league_id: str):
             bot_id = bot["id"]
             await db.execute(
                 """INSERT INTO draft_settings (draft_id, team_id, autodraft, queue)
-                   VALUES (?, ?, 1, '[]')
+                   VALUES ($1, $2, 1, '[]')
                    ON CONFLICT(draft_id, team_id) DO UPDATE SET autodraft=1""",
                 (draft_id, bot_id),
             )
@@ -144,7 +144,7 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
             """SELECT tp.player_id, p.position,
                       COALESCE(p.market_value, 0) AS market_value
                FROM team_players tp JOIN players p ON tp.player_id = p.id
-               WHERE tp.team_id=?""",
+               WHERE tp.team_id=$1""",
             (team_id,),
         )
         if not rows:
@@ -176,45 +176,45 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
         vc_id = sorted_starters[1]["player_id"] if len(sorted_starters) > 1 else None
 
         await db.execute(
-            "UPDATE team_players SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=?",
+            "UPDATE team_players SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=$1",
             (team_id,),
         )
         for pid in chosen_ids:
             await db.execute(
-                "UPDATE team_players SET is_starter=1 WHERE team_id=? AND player_id=?",
+                "UPDATE team_players SET is_starter=1 WHERE team_id=$1 AND player_id=$2",
                 (team_id, pid),
             )
         if captain_id:
             await db.execute(
-                "UPDATE team_players SET is_captain=1 WHERE team_id=? AND player_id=?",
+                "UPDATE team_players SET is_captain=1 WHERE team_id=$1 AND player_id=$2",
                 (team_id, captain_id),
             )
         if vc_id:
             await db.execute(
-                "UPDATE team_players SET is_vice_captain=1 WHERE team_id=? AND player_id=?",
+                "UPDATE team_players SET is_vice_captain=1 WHERE team_id=$1 AND player_id=$2",
                 (team_id, vc_id),
             )
 
         # Propagate to any existing matchday_lineups snapshots so past/active
         # matchdays score correctly when scoring engine prefers matchday_lineups.
         await db.execute(
-            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=?",
+            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=$1",
             (team_id,),
         )
         if chosen_ids:
-            placeholders = ",".join("?" * len(chosen_ids))
+            placeholders = ",".join(f"${i+2}" for i in range(len(chosen_ids)))
             await db.execute(
-                f"UPDATE matchday_lineups SET is_starter=1 WHERE team_id=? AND player_id IN ({placeholders})",
+                f"UPDATE matchday_lineups SET is_starter=1 WHERE team_id=$1 AND player_id IN ({placeholders})",
                 (team_id, *chosen_ids),
             )
         if captain_id:
             await db.execute(
-                "UPDATE matchday_lineups SET is_captain=1 WHERE team_id=? AND player_id=?",
+                "UPDATE matchday_lineups SET is_captain=1 WHERE team_id=$1 AND player_id=$2",
                 (team_id, captain_id),
             )
         if vc_id:
             await db.execute(
-                "UPDATE matchday_lineups SET is_vice_captain=1 WHERE team_id=? AND player_id=?",
+                "UPDATE matchday_lineups SET is_vice_captain=1 WHERE team_id=$1 AND player_id=$2",
                 (team_id, vc_id),
             )
 
@@ -231,7 +231,7 @@ async def auto_lineup_all_bots(league_id: str) -> int:
     db = await get_db()
     try:
         bots = await db.execute_fetchall(
-            "SELECT id FROM fantasy_teams WHERE league_id=? AND owner_nick LIKE 'bot_%'",
+            "SELECT id FROM fantasy_teams WHERE league_id=$1 AND owner_nick LIKE 'bot_%'",
             (league_id,),
         )
         bot_ids = [dict(b)["id"] for b in bots]
@@ -252,20 +252,22 @@ async def remove_bots(league_id: str) -> int:
     db = await get_db()
     try:
         bots = await db.execute_fetchall(
-            "SELECT id FROM fantasy_teams WHERE league_id=? AND owner_nick LIKE 'bot_%'",
+            "SELECT id FROM fantasy_teams WHERE league_id=$1 AND owner_nick LIKE 'bot_%'",
             (league_id,),
         )
         bot_ids = [b["id"] for b in bots]
         if not bot_ids:
             return 0
 
-        placeholders = ",".join("?" * len(bot_ids))
+        n = len(bot_ids)
+        placeholders = ",".join(f"${i+1}" for i in range(n))
+        placeholders2 = ",".join(f"${i+1+n}" for i in range(n))
         # Clean up in FK-safe order
         await db.execute(f"DELETE FROM matchday_lineups WHERE team_id IN ({placeholders})", bot_ids)
         await db.execute(f"DELETE FROM team_players WHERE team_id IN ({placeholders})", bot_ids)
         await db.execute(f"DELETE FROM draft_settings WHERE team_id IN ({placeholders})", bot_ids)
         await db.execute(f"DELETE FROM draft_picks WHERE team_id IN ({placeholders})", bot_ids)
-        await db.execute(f"DELETE FROM transfers WHERE from_team_id IN ({placeholders}) OR to_team_id IN ({placeholders})", bot_ids + bot_ids)
+        await db.execute(f"DELETE FROM transfers WHERE from_team_id IN ({placeholders}) OR to_team_id IN ({placeholders2})", bot_ids + bot_ids)
         await db.execute(f"DELETE FROM fantasy_teams WHERE id IN ({placeholders})", bot_ids)
         await db.commit()
         logger.info(f"Removed {len(bot_ids)} bots from league {league_id}")

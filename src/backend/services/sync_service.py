@@ -129,8 +129,8 @@ async def sync_results() -> dict:
         removed = 0
         if stale_ids:
             for stale_id in stale_ids:
-                await db.execute("DELETE FROM match_scores WHERE match_id = ?", (stale_id,))
-                await db.execute("DELETE FROM matches WHERE id = ?", (stale_id,))
+                await db.execute("DELETE FROM match_scores WHERE match_id = $1", (stale_id,))
+                await db.execute("DELETE FROM matches WHERE id = $1", (stale_id,))
             await db.commit()
             removed = len(stale_ids)
             logger.info(f"Removed {removed} stale matches (simulator reset detected)")
@@ -168,7 +168,7 @@ async def sync_results() -> dict:
             # Upsert matchday (mark as active once it has results)
             await db.execute(
                 """INSERT INTO matchdays (id, name, date, phase, status)
-                   VALUES (?, ?, ?, ?, 'active')
+                   VALUES ($1, $2, $3, $4, 'active')
                    ON CONFLICT(id) DO UPDATE SET status = 'active'""",
                 (matchday_id, matchday_id, match.get("kickoff", ""), "group_stage"),
             )
@@ -178,20 +178,20 @@ async def sync_results() -> dict:
             away_code = match.get("away_code", "")
             if home_code:
                 await db.execute(
-                    "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
+                    "INSERT INTO countries (code, name) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING",
                     (home_code, match.get("home_team", home_code)),
                 )
             if away_code:
                 await db.execute(
-                    "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
+                    "INSERT INTO countries (code, name) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING",
                     (away_code, match.get("away_team", away_code)),
                 )
             
             # Insert match result (IGNORE if already exists — don't overwrite)
             await db.execute(
-                """INSERT OR IGNORE INTO matches (id, matchday_id, home_country, away_country,
+                """INSERT INTO matches (id, matchday_id, home_country, away_country,
                    kickoff, score_home, score_away, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 'finished')""",
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, 'finished') ON CONFLICT (id) DO NOTHING""",
                 (match_id, matchday_id, home_code,
                  away_code, match.get("kickoff", ""),
                  match.get("score_home"), match.get("score_away")),
@@ -205,24 +205,25 @@ async def sync_results() -> dict:
                 
                 # Ensure country exists FIRST (player has FK to country)
                 await db.execute(
-                    "INSERT OR IGNORE INTO countries (code, name) VALUES (?, ?)",
+                    "INSERT INTO countries (code, name) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING",
                     (s.get("country_code", ""), s.get("country_code", "")),
                 )
                 
                 # Ensure player exists in local DB (FK to countries)
                 await db.execute(
-                    """INSERT OR IGNORE INTO players (id, name, country_code, position, market_value)
-                       VALUES (?, ?, ?, ?, 0)""",
+                    """INSERT INTO players (id, name, country_code, position, market_value)
+                       VALUES ($1, $2, $3, $4, 0)""",
                     (player_id, s.get("player_name", ""), s.get("country_code", ""), position),
                 )
                 
                 # INSERT OR IGNORE: only insert new scores, never overwrite
                 await db.execute(
-                    """INSERT OR IGNORE INTO match_scores
+                    """INSERT INTO match_scores
                        (player_id, matchday_id, match_id, minutes_played, goals, assists,
                         clean_sheet, yellow_cards, red_card, own_goals, penalties_missed,
                         penalties_saved, saves, goals_conceded, rating, total_points)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                       ON CONFLICT (player_id, matchday_id) DO NOTHING""",
                     (player_id, matchday_id, match_id,
                      s.get("minutes_played", 0), s.get("goals", 0), s.get("assists", 0),
                      1 if s.get("clean_sheet") else 0,
@@ -245,7 +246,7 @@ async def sync_results() -> dict:
         
         # Update sync state
         await db.execute(
-            "INSERT OR REPLACE INTO sync_state (key, value) VALUES ('last_sync', ?)",
+            "INSERT INTO sync_state (key, value) VALUES ('last_sync', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
             (datetime.utcnow().isoformat(),),
         )
         await db.commit()
@@ -282,8 +283,9 @@ async def _update_team_points(matchday_ids: list[str]) -> int:
                 pts = await ScoringEngine.get_team_matchday_points(team["id"], md_id)
                 # Store calculated points (for leaderboard queries)
                 await db.execute(
-                    """INSERT OR REPLACE INTO sync_state (key, value)
-                       VALUES (?, ?)""",
+                    """INSERT INTO sync_state (key, value)
+                       VALUES ($1, $2)
+                       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value""",
                     (f"team_pts:{team['id']}:{md_id}", str(pts)),
                 )
                 count += 1

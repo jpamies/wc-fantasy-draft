@@ -40,7 +40,7 @@ async def simulate_match_scores(matchday_id: str):
     try:
         # Get matches for this matchday
         matches = await db.execute_fetchall(
-            "SELECT * FROM matches WHERE matchday_id=?", (matchday_id,)
+            "SELECT * FROM matches WHERE matchday_id=$1", (matchday_id,)
         )
         if not matches:
             print(f"No matches found for matchday {matchday_id}")
@@ -58,7 +58,7 @@ async def simulate_match_scores(matchday_id: str):
 
             # Update match result
             await db.execute(
-                "UPDATE matches SET score_home=?, score_away=?, status='finished' WHERE id=?",
+                "UPDATE matches SET score_home=$1, score_away=$2, status='finished' WHERE id=$3",
                 (score_home, score_away, m["id"]),
             )
 
@@ -68,7 +68,7 @@ async def simulate_match_scores(matchday_id: str):
                 (away, score_away, score_home),
             ]:
                 players = await db.execute_fetchall(
-                    "SELECT id, name, position FROM players WHERE country_code=? ORDER BY market_value DESC LIMIT 23",
+                    "SELECT id, name, position FROM players WHERE country_code=$1 ORDER BY market_value DESC LIMIT 23",
                     (country,),
                 )
                 if not players:
@@ -143,11 +143,11 @@ async def simulate_match_scores(matchday_id: str):
                     )
 
                     await db.execute(
-                        """INSERT OR REPLACE INTO match_scores
+                        """INSERT INTO match_scores
                            (player_id, matchday_id, match_id, minutes_played, goals, assists,
                             clean_sheet, yellow_cards, red_card, own_goals, penalties_missed,
                             penalties_saved, saves, goals_conceded, rating, total_points)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (player_id, matchday_id) DO NOTHING""",
                         (p["id"], matchday_id, m["id"], minutes, p_goals, p_assists,
                          int(clean_sheet), yellow, int(red), own_goal, 0, pen_saved,
                          saves, goals_conceded if p["position"] in ("GK", "DEF") else 0,
@@ -166,11 +166,11 @@ async def simulate_match_scores(matchday_id: str):
                             clean_sheet=goals_conceded == 0, rating=6.0, is_mvp=False,
                         )
                         await db.execute(
-                            """INSERT OR REPLACE INTO match_scores
+                            """INSERT INTO match_scores
                                (player_id, matchday_id, match_id, minutes_played, goals, assists,
                                 clean_sheet, yellow_cards, red_card, own_goals, penalties_missed,
                                 penalties_saved, saves, goals_conceded, rating, total_points)
-                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (player_id, matchday_id) DO NOTHING""",
                             (p["id"], matchday_id, m["id"], sub_min, 0, 0,
                              int(goals_conceded == 0), 0, 0, 0, 0, 0, 0, 0, 6.0, total),
                         )
@@ -179,12 +179,12 @@ async def simulate_match_scores(matchday_id: str):
                 # Update MVP — recalculate that player's points with is_mvp=True
                 if mvp_id and best_rating >= 7.5:
                     mvp_row = await db.execute_fetchall(
-                        "SELECT * FROM match_scores WHERE player_id=? AND matchday_id=? AND match_id=?",
+                        "SELECT * FROM match_scores WHERE player_id=$1 AND matchday_id=$2 AND match_id=$3",
                         (mvp_id, matchday_id, m["id"]),
                     )
                     if mvp_row:
                         mv = dict(mvp_row[0])
-                        p_info = await db.execute_fetchall("SELECT position FROM players WHERE id=?", (mvp_id,))
+                        p_info = await db.execute_fetchall("SELECT position FROM players WHERE id=$1", (mvp_id,))
                         if p_info:
                             new_total = calculate_points(
                                 position=dict(p_info[0])["position"],
@@ -196,14 +196,14 @@ async def simulate_match_scores(matchday_id: str):
                                 clean_sheet=bool(mv["clean_sheet"]), rating=best_rating, is_mvp=True,
                             )
                             await db.execute(
-                                "UPDATE match_scores SET rating=?, total_points=?, bonus_points=3 WHERE player_id=? AND matchday_id=? AND match_id=?",
+                                "UPDATE match_scores SET rating=$1, total_points=$2, bonus_points=3 WHERE player_id=$3 AND matchday_id=$4 AND match_id=$5",
                                 (best_rating, new_total, mvp_id, matchday_id, m["id"]),
                             )
 
             print(f"  ⚽ {home} {score_home}-{score_away} {away}")
 
         # Mark matchday complete
-        await db.execute("UPDATE matchdays SET status='completed' WHERE id=?", (matchday_id,))
+        await db.execute("UPDATE matchdays SET status='completed' WHERE id=$1", (matchday_id,))
         await db.commit()
         print(f"\n✅ Simulated {total_scored} player scores for matchday {matchday_id}")
     finally:

@@ -1,8 +1,20 @@
-import aiosqlite
-import os
-from src.backend.config import settings
+"""Database layer using asyncpg (PostgreSQL).
 
-DB_PATH = settings.DATABASE_PATH
+Provides a thin wrapper around asyncpg that mimics the aiosqlite API used
+by routes and services: get_db(), db.execute(), db.execute_fetchall(),
+db.commit(), db.close().
+
+All SQL uses PostgreSQL placeholder syntax ($1, $2, ...) and dialect.
+"""
+
+import logging
+import time
+import asyncpg
+from src.backend.config import DATABASE_URL
+
+_pool: asyncpg.Pool | None = None
+logger = logging.getLogger("wc-fantasy.db")
+SLOW_QUERY_MS = 100
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS countries (
@@ -53,11 +65,13 @@ CREATE TABLE IF NOT EXISTS fantasy_teams (
     team_name TEXT NOT NULL,
     budget INTEGER DEFAULT 500000000,
     formation TEXT DEFAULT '4-3-3',
+    protect_budget_allocated INTEGER DEFAULT 0,
+    last_market_window_id INTEGER,
     created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS team_players (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     player_id TEXT NOT NULL REFERENCES players(id),
     is_starter INTEGER DEFAULT 0,
@@ -67,6 +81,7 @@ CREATE TABLE IF NOT EXISTS team_players (
     bench_order INTEGER DEFAULT 0,
     acquired_via TEXT DEFAULT 'draft' CHECK(acquired_via IN ('draft','free_market','transfer','clause')),
     acquired_at TEXT NOT NULL,
+    market_window_acquired INTEGER,
     UNIQUE(team_id, player_id)
 );
 
@@ -82,7 +97,7 @@ CREATE TABLE IF NOT EXISTS drafts (
 );
 
 CREATE TABLE IF NOT EXISTS draft_picks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     draft_id TEXT NOT NULL REFERENCES drafts(id),
     round INTEGER NOT NULL,
     pick INTEGER NOT NULL,
@@ -124,11 +139,12 @@ CREATE TABLE IF NOT EXISTS matches (
     kickoff TEXT,
     score_home INTEGER,
     score_away INTEGER,
-    status TEXT DEFAULT 'scheduled' CHECK(status IN ('scheduled','live','finished'))
+    status TEXT DEFAULT 'scheduled' CHECK(status IN ('scheduled','live','finished')),
+    tournament_phase TEXT
 );
 
 CREATE TABLE IF NOT EXISTS match_scores (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     player_id TEXT NOT NULL REFERENCES players(id),
     matchday_id TEXT NOT NULL REFERENCES matchdays(id),
     match_id TEXT REFERENCES matches(id),
@@ -159,7 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_transfers_league ON transfers(league_id);
 CREATE INDEX IF NOT EXISTS idx_fantasy_teams_league ON fantasy_teams(league_id);
 
 CREATE TABLE IF NOT EXISTS matchday_lineups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     matchday_id TEXT NOT NULL REFERENCES matchdays(id),
     player_id TEXT NOT NULL REFERENCES players(id),
@@ -171,7 +187,7 @@ CREATE TABLE IF NOT EXISTS matchday_lineups (
 CREATE INDEX IF NOT EXISTS idx_matchday_lineups_team ON matchday_lineups(team_id, matchday_id);
 
 CREATE TABLE IF NOT EXISTS draft_settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     draft_id TEXT NOT NULL REFERENCES drafts(id),
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     autodraft INTEGER DEFAULT 0,
@@ -187,7 +203,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
 -- MARKET & DRAFT TABLES
 
 CREATE TABLE IF NOT EXISTS market_windows (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     league_id TEXT NOT NULL REFERENCES leagues(id),
     phase TEXT NOT NULL,
     market_type TEXT,
@@ -202,25 +218,26 @@ CREATE TABLE IF NOT EXISTS market_windows (
     max_sells INTEGER DEFAULT 3,
     initial_budget INTEGER DEFAULT 100000000,
     protect_budget INTEGER DEFAULT 300000000,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    auto_generated INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
     UNIQUE(league_id, phase)
 );
 
 CREATE TABLE IF NOT EXISTS player_clauses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     player_id TEXT NOT NULL REFERENCES players(id),
     clause_amount INTEGER NOT NULL DEFAULT 0,
     is_blocked INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
     UNIQUE(market_window_id, team_id, player_id)
 );
 
 CREATE TABLE IF NOT EXISTS market_budgets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     initial_budget INTEGER NOT NULL,
@@ -229,30 +246,30 @@ CREATE TABLE IF NOT EXISTS market_budgets (
     remaining_budget INTEGER NOT NULL,
     buys_count INTEGER DEFAULT 0,
     sells_count INTEGER DEFAULT 0,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
     UNIQUE(market_window_id, team_id)
 );
 
 CREATE TABLE IF NOT EXISTS market_transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
     buyer_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     seller_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     player_id TEXT NOT NULL REFERENCES players(id),
     clause_amount_paid INTEGER NOT NULL,
-    transaction_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    transaction_date TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
     status TEXT DEFAULT 'completed' CHECK(status IN ('completed','failed','reverted')),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS reposition_draft_picks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     pick_number INTEGER NOT NULL,
     player_id TEXT REFERENCES players(id),
     is_pass INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
 );
 
 CREATE INDEX IF NOT EXISTS idx_market_windows_league ON market_windows(league_id);
@@ -267,51 +284,111 @@ CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(t
 """
 
 
-async def get_db() -> aiosqlite.Connection:
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-    db = await aiosqlite.connect(DB_PATH, timeout=30.0)
-    db.row_factory = aiosqlite.Row
-    await db.execute("PRAGMA journal_mode=WAL")
-    await db.execute("PRAGMA busy_timeout=10000")
-    await db.execute("PRAGMA synchronous=NORMAL")
-    await db.execute("PRAGMA foreign_keys=ON")
-    return db
+class PgConnection:
+    """Thin wrapper around asyncpg.Connection mimicking aiosqlite API.
+
+    Usage:
+        db = await get_db()
+        try:
+            rows = await db.execute_fetchall("SELECT * FROM t WHERE id = $1", (val,))
+            await db.execute("INSERT INTO t VALUES ($1, $2)", (a, b))
+            await db.commit()
+        finally:
+            await db.close()
+    """
+
+    def __init__(self, conn: asyncpg.Connection):
+        self._conn = conn
+        self._tx = None
+
+    async def execute(self, sql: str, params=None):
+        if self._tx is None:
+            self._tx = self._conn.transaction()
+            await self._tx.start()
+        start = time.perf_counter()
+        if params:
+            await self._conn.execute(sql, *params)
+        else:
+            await self._conn.execute(sql)
+        ms = (time.perf_counter() - start) * 1000
+        if ms > SLOW_QUERY_MS:
+            logger.warning(f"SLOW EXEC ({ms:.0f}ms): {sql[:120]}")
+
+    async def execute_fetchall(self, sql: str, params=None) -> list[dict]:
+        start = time.perf_counter()
+        if params:
+            rows = await self._conn.fetch(sql, *params)
+        else:
+            rows = await self._conn.fetch(sql)
+        ms = (time.perf_counter() - start) * 1000
+        if ms > SLOW_QUERY_MS:
+            logger.warning(f"SLOW QUERY ({ms:.0f}ms, {len(rows)} rows): {sql[:120]}")
+        return [dict(r) for r in rows]
+
+    async def fetchval(self, sql: str, params=None):
+        if params:
+            return await self._conn.fetchval(sql, *params)
+        return await self._conn.fetchval(sql)
+
+    async def commit(self):
+        if self._tx is not None:
+            await self._tx.commit()
+            self._tx = None
+
+    async def rollback(self):
+        if self._tx is not None:
+            try:
+                await self._tx.rollback()
+            except Exception:
+                pass
+            self._tx = None
+
+    async def close(self):
+        if self._tx is not None:
+            try:
+                await self._tx.rollback()
+            except Exception:
+                pass
+            self._tx = None
+        await _pool.release(self._conn)
+
+
+async def get_db() -> PgConnection:
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    conn = await _pool.acquire()
+    return PgConnection(conn)
 
 
 async def init_db():
-    db = await get_db()
-    try:
-        await db.executescript(SCHEMA)
-        # Migration: add display_name column if missing
-        try:
-            await db.execute("ALTER TABLE fantasy_teams ADD COLUMN display_name TEXT DEFAULT ''")
-        except Exception:
-            pass  # Column already exists
-        
-        # Migration: add market-related columns to fantasy_teams
-        try:
-            await db.execute("ALTER TABLE fantasy_teams ADD COLUMN protect_budget_allocated INTEGER DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE fantasy_teams ADD COLUMN last_market_window_id INTEGER")
-        except Exception:
-            pass
-        
-        # Migration: add market-related columns to team_players
-        try:
-            await db.execute("ALTER TABLE team_players ADD COLUMN market_window_acquired INTEGER")
-        except Exception:
-            pass
-        
-        # Migration: add tournament_phase to matches
-        try:
-            await db.execute("ALTER TABLE matches ADD COLUMN tournament_phase TEXT")
-        except Exception:
-            pass
-        
-        # Migration: update existing leagues from max_teams=8 to 10
-        await db.execute("UPDATE leagues SET max_teams=10 WHERE max_teams=8")
-        await db.commit()
-    finally:
-        await db.close()
+    """Create tables if they don't exist."""
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+
+    async with _pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'countries')"
+        )
+        if not exists:
+            await conn.execute(SCHEMA)
+            print("[DB] PostgreSQL schema created")
+        else:
+            print("[DB] PostgreSQL schema already exists, skipping")
+
+
+async def close_pool():
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
+
+
+
+async def close_pool():
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
+

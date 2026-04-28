@@ -40,15 +40,16 @@ async def list_players(
     try:
         where = []
         params: list = []
+        idx = 1
         if country:
-            where.append("country_code=?")
-            params.append(country)
+            where.append(f"country_code=${idx}")
+            params.append(country); idx += 1
         if position:
-            where.append("position=?")
-            params.append(position)
+            where.append(f"position=${idx}")
+            params.append(position); idx += 1
         if search:
-            where.append("name LIKE ?")
-            params.append(f"%{search}%")
+            where.append(f"name ILIKE ${idx}")
+            params.append(f"%{search}%"); idx += 1
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         allowed_sorts = {"market_value", "name", "age", "clause_value", "position"}
@@ -56,7 +57,7 @@ async def list_players(
         order_dir = "ASC" if order.lower() == "asc" else "DESC"
 
         rows = await db.execute_fetchall(
-            f"SELECT * FROM players {where_sql} ORDER BY {sort_col} {order_dir} LIMIT ? OFFSET ?",
+            f"SELECT * FROM players {where_sql} ORDER BY {sort_col} {order_dir} LIMIT ${idx} OFFSET ${idx+1}",
             params + [limit, offset],
         )
         return [PlayerOut(**dict(r)) for r in rows]
@@ -76,7 +77,7 @@ async def get_player(player_id: str):
     from src.backend.database import get_db
     db = await get_db()
     try:
-        rows = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
+        rows = await db.execute_fetchall("SELECT * FROM players WHERE id=$1", (player_id,))
         if not rows:
             raise HTTPException(404, "Player not found")
         return PlayerOut(**dict(rows[0]))
@@ -135,7 +136,7 @@ async def get_player_stats(player_id: str):
             """SELECT ms.matchday_id, ms.match_id, ms.minutes_played, ms.goals, ms.assists,
                       ms.yellow_cards, ms.red_card, ms.clean_sheet, ms.saves,
                       ms.goals_conceded, ms.rating, ms.total_points
-               FROM match_scores ms WHERE ms.player_id=?
+               FROM match_scores ms WHERE ms.player_id=$1
                ORDER BY ms.matchday_id""",
             (player_id,),
         )
@@ -143,7 +144,7 @@ async def get_player_stats(player_id: str):
 
         # If no player from simulator, try local DB
         if not result["player"]:
-            row = await db.execute_fetchall("SELECT * FROM players WHERE id=?", (player_id,))
+            row = await db.execute_fetchall("SELECT * FROM players WHERE id=$1", (player_id,))
             if row:
                 r = dict(row[0])
                 result["player"] = {

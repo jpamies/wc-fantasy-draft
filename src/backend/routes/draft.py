@@ -144,10 +144,10 @@ async def get_queue(league_id: str, auth: dict = Depends(get_current_team)):
         from src.backend.database import get_db
         db = await get_db()
         try:
-            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+            drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
             picked_set = set()
             if drafts:
-                picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (drafts[0]["id"],))
+                picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=$1", (drafts[0]["id"],))
                 picked_set = {p["player_id"] for p in picked}
         finally:
             await db.close()
@@ -169,10 +169,10 @@ async def get_queue(league_id: str, auth: dict = Depends(get_current_team)):
             f"SELECT * FROM players WHERE id IN ({placeholders})", queue_ids
         )
         player_map = {r["id"]: dict(r) for r in rows}
-        drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=?", (league_id,))
+        drafts = await db.execute_fetchall("SELECT id FROM drafts WHERE league_id=$1", (league_id,))
         picked_set = set()
         if drafts:
-            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=?", (drafts[0]["id"],))
+            picked = await db.execute_fetchall("SELECT player_id FROM draft_picks WHERE draft_id=$1", (drafts[0]["id"],))
             picked_set = {p["player_id"] for p in picked}
 
         result = []

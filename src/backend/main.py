@@ -32,16 +32,24 @@ async def lifespan(app: FastAPI):
     # Start market window auto-transition watchdog
     market_watchdog_task = asyncio.create_task(_market_auto_transition_watchdog())
 
+    # Start auto market-window creator (creates windows when each phase finishes)
+    auto_market_creator_task = asyncio.create_task(_auto_market_window_creator())
+
     yield
 
     watchdog_task.cancel()
     market_watchdog_task.cancel()
+    auto_market_creator_task.cancel()
     try:
         await watchdog_task
     except asyncio.CancelledError:
         pass
     try:
         await market_watchdog_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await auto_market_creator_task
     except asyncio.CancelledError:
         pass
 
@@ -189,7 +197,7 @@ async def _market_auto_transition_watchdog():
                         db = await get_db()
                         try:
                             await db.execute(
-                                "UPDATE market_windows SET status='completed', updated_at=? WHERE id=?",
+                                "UPDATE market_windows SET status='completed', updated_at=$1 WHERE id=$2",
                                 (now_dt.isoformat(), window["id"]),
                             )
                             await db.commit()
@@ -203,6 +211,111 @@ async def _market_auto_transition_watchdog():
             raise
         except Exception as e:
             print(f"[market watchdog] loop error: {e}")
+
+
+# Phases that get an auto-generated market window when the previous phase finishes.
+# Tuple: (source_phase_that_just_finished, target_phase_for_window)
+_AUTO_MARKET_TRANSITIONS = [
+    ("groups", "r32"),
+    ("r32", "r16"),
+    ("r16", "quarter"),
+    ("quarter", "semi"),
+    ("semi", "final"),
+]
+
+
+async def _auto_market_window_creator():
+    """Periodically check active leagues; when all matchdays of a phase that
+    feeds into a knockout round are finished, automatically create a market
+    window for the next phase (clause/market/reposition draft, 1 day each)."""
+    from src.backend.database import get_db
+    from src.backend.services.market_service import MarketService
+    from datetime import datetime, timezone, timedelta
+
+    print("Auto market-window creator started.")
+    while True:
+        try:
+            await asyncio.sleep(60)
+            db = await get_db()
+            try:
+                # Active leagues only (draft completed and tournament running)
+                leagues_rows = await db.execute_fetchall(
+                    "SELECT id FROM leagues WHERE status IN ('active', 'in_progress')"
+                )
+                # Phase completion status (global — matchdays are shared across leagues)
+                md_rows = await db.execute_fetchall(
+                    "SELECT phase, status FROM matchdays"
+                )
+            finally:
+                await db.close()
+
+            phase_totals: dict[str, int] = {}
+            phase_finished: dict[str, int] = {}
+            for r in md_rows:
+                ph = r["phase"]
+                phase_totals[ph] = phase_totals.get(ph, 0) + 1
+                if r["status"] == "finished":
+                    phase_finished[ph] = phase_finished.get(ph, 0) + 1
+
+            completed_phases = {
+                ph for ph, total in phase_totals.items()
+                if total > 0 and phase_finished.get(ph, 0) >= total
+            }
+
+            for src_phase, tgt_phase in _AUTO_MARKET_TRANSITIONS:
+                if src_phase not in completed_phases:
+                    continue
+
+                for lg in leagues_rows:
+                    league_id = lg["id"]
+                    db = await get_db()
+                    try:
+                        existing = await db.execute_fetchall(
+                            "SELECT id FROM market_windows WHERE league_id=$1 AND phase=$2",
+                            (league_id, tgt_phase),
+                        )
+                    finally:
+                        await db.close()
+                    if existing:
+                        continue
+
+                    now_dt = datetime.now(timezone.utc)
+                    clause_start = now_dt
+                    clause_end = clause_start + timedelta(days=1)
+                    market_start = clause_end
+                    market_end = market_start + timedelta(days=1)
+                    repo_start = market_end
+                    repo_end = repo_start + timedelta(days=1)
+                    try:
+                        result = await MarketService.create_market_window(
+                            league_id=league_id,
+                            phase=tgt_phase,
+                            market_type="auto",
+                            clause_window_start=clause_start.isoformat(),
+                            clause_window_end=clause_end.isoformat(),
+                            market_window_start=market_start.isoformat(),
+                            market_window_end=market_end.isoformat(),
+                            reposition_draft_start=repo_start.isoformat(),
+                            reposition_draft_end=repo_end.isoformat(),
+                        )
+                        # Mark as auto-generated
+                        db2 = await get_db()
+                        try:
+                            await db2.execute(
+                                "UPDATE market_windows SET auto_generated=1 WHERE id=$1",
+                                (result["id"],),
+                            )
+                            await db2.commit()
+                        finally:
+                            await db2.close()
+                        print(f"[auto-market] created window id={result['id']} league={league_id} phase={tgt_phase}")
+                    except Exception as e:
+                        print(f"[auto-market] error creating window for league={league_id} phase={tgt_phase}: {e}")
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[auto-market] loop error: {e}")
 
 
 app = FastAPI(
