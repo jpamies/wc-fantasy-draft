@@ -759,13 +759,28 @@ class MarketService:
           - are not currently in any team of this league, AND
           - belong to a country that is still in the tournament.
 
+        Uses the simulator as the primary data source so photos, market
+        values and club info are always present (the local players table
+        may be a stub created by the score sync). Each player is enriched
+        with ``total_points`` from match_scores.
+
         "Alive" definition: the country has played as many matches as the
         country that has played the most. If no matches exist yet, the
         tournament hasn't started so every country is considered alive.
         """
+        from src.backend.config import settings
+
         db = await get_db()
         try:
-            # Compute alive country set in Python — much simpler than nested SQL.
+            # 1. Owned players in this league.
+            owned_rows = await db.execute_fetchall(
+                """SELECT DISTINCT player_id FROM team_players
+                   WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id = $1)""",
+                (league_id,),
+            )
+            owned_ids = {r["player_id"] for r in owned_rows}
+
+            # 2. Alive country set.
             counts_rows = await db.execute_fetchall(
                 """SELECT country, COUNT(*) as cnt FROM (
                        SELECT home_country AS country FROM matches WHERE status='finished'
@@ -774,36 +789,59 @@ class MarketService:
                    ) sub
                    GROUP BY country"""
             )
-
             if counts_rows:
                 max_cnt = max(r["cnt"] for r in counts_rows)
                 alive_codes = {r["country"] for r in counts_rows if r["cnt"] == max_cnt}
             else:
                 alive_codes = None  # tournament not started → no filter
 
-            # Fetch players not owned in this league.
-            players = await db.execute_fetchall(
-                """SELECT p.id, p.name, p.position, p.country_code, p.photo, p.market_value
-                   FROM players p
-                   WHERE p.id NOT IN (
-                       SELECT DISTINCT player_id FROM team_players 
-                       WHERE team_id IN (
-                           SELECT id FROM fantasy_teams WHERE league_id = $1
-                       )
-                   )
-                   ORDER BY p.market_value DESC""",
-                (league_id,),
+            # 3. Total points per player (from match_scores).
+            score_rows = await db.execute_fetchall(
+                """SELECT player_id, COALESCE(SUM(total_points), 0) AS pts
+                   FROM match_scores GROUP BY player_id"""
             )
-
-            result = [dict(p) for p in players]
-            if alive_codes is not None:
-                result = [p for p in result if p["country_code"] in alive_codes]
-            return result
-        except Exception as e:
-            logger.error(f"Error getting available reposition players: {e}")
-            raise
+            points_by_id = {r["player_id"]: r["pts"] for r in score_rows}
         finally:
             await db.close()
+
+        # 4. Player catalogue — prefer simulator (full data: photo, market_value, strength).
+        catalogue: List[Dict[str, Any]] = []
+        if settings.SIMULATOR_API_URL:
+            try:
+                from src.backend.services.simulator_client import fetch_all_squad_players
+                catalogue = await fetch_all_squad_players()
+            except Exception as e:
+                logger.warning(f"Simulator unavailable for reposition pool: {e}")
+
+        if not catalogue:
+            # Fallback to local DB.
+            db = await get_db()
+            try:
+                rows = await db.execute_fetchall(
+                    """SELECT id, name, position, country_code, photo, market_value, club, club_logo
+                       FROM players ORDER BY market_value DESC"""
+                )
+                catalogue = [dict(r) for r in rows]
+            finally:
+                await db.close()
+
+        result = []
+        for p in catalogue:
+            pid = p.get("id")
+            if not pid or pid in owned_ids:
+                continue
+            if alive_codes is not None and p.get("country_code") not in alive_codes:
+                continue
+            entry = dict(p)
+            entry["total_points"] = points_by_id.get(pid, 0)
+            result.append(entry)
+
+        # Highest market value first; tiebreak by total_points.
+        result.sort(
+            key=lambda x: (x.get("market_value") or 0, x.get("total_points") or 0),
+            reverse=True,
+        )
+        return result
 
     @staticmethod
     async def make_reposition_draft_pick(

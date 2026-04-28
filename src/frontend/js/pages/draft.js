@@ -515,6 +515,7 @@ Router.register('#/draft', async (container) => {
 async function renderRepositionDraft(container, leagueId, windowId) {
     const teamId = API.getTeamId();
     let state, players = [];
+    let team = { players: [] };
     let filterPos = '';
     let filterCountry = '';
     let searchTerm = '';
@@ -530,6 +531,9 @@ async function renderRepositionDraft(container, leagueId, windowId) {
 
     async function loadState() {
         state = await API.get(`/leagues/${leagueId}/market/${windowId}/reposition-draft-state`);
+    }
+    async function loadTeam() {
+        try { team = await API.get(`/teams/${teamId}`); } catch { team = { players: [] }; }
     }
     async function loadPlayers() {
         const all = await API.get(`/leagues/${leagueId}/market/${windowId}/reposition-available-players`);
@@ -612,7 +616,7 @@ async function renderRepositionDraft(container, leagueId, windowId) {
                             `).join('')}
                         </div>
                     </div>
-                    <div class="card">
+                    <div class="card mb-2">
                         <div class="card-header">Mis picks (${myPicksCount})</div>
                         ${(state.my_picks || []).filter(p => p.player_id).map(p => `
                             <div style="font-size:.8rem;padding:.15rem 0;display:flex;align-items:center;gap:.4rem">
@@ -620,6 +624,21 @@ async function renderRepositionDraft(container, leagueId, windowId) {
                             </div>
                         `).join('')}
                         ${myPicksCount === 0 ? '<p style="color:var(--text-muted);font-size:.85rem">Sin picks todavía</p>' : ''}
+                    </div>
+                    <div class="card">
+                        <div class="card-header">Mi plantilla (${(team.players || []).length}/23)</div>
+                        ${['GK','DEF','MID','FWD'].map(pos => {
+                            const pp = (team.players || []).filter(p => p.position === pos);
+                            const cap = {GK:3, DEF:8, MID:8, FWD:8}[pos];
+                            return `<div style="margin-bottom:.5rem">
+                                <small style="color:var(--text-muted)">${pos} (${pp.length}/${cap})</small>
+                                ${pp.map(p => `<div style="font-size:.78rem;padding:.1rem 0;display:flex;align-items:center;gap:.4rem">
+                                    ${posBadge(pos)} <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
+                                    <span style="color:var(--text-muted);font-size:.7rem">${p.country_code}</span>
+                                </div>`).join('')}
+                            </div>`;
+                        }).join('')}
+                        ${(team.players || []).length === 0 ? '<p style="color:var(--text-muted);font-size:.85rem">Sin jugadores</p>' : ''}
                     </div>
                 </div>
             </div>
@@ -634,13 +653,14 @@ async function renderRepositionDraft(container, leagueId, windowId) {
         }
         return list.map(p => `
             <div class="player-card" data-pid="${p.id}">
-                <img src="${p.photo}" alt="" referrerpolicy="no-referrer" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><rect fill=%22%23374151%22 width=%2240%22 height=%2240%22/><text x=%2220%22 y=%2225%22 text-anchor=%22middle%22 fill=%22%239ca3af%22 font-size=%2214%22>⚽</text></svg>'">
+                <img src="${p.photo || ''}" alt="" referrerpolicy="no-referrer" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><rect fill=%22%23374151%22 width=%2240%22 height=%2240%22/><text x=%2220%22 y=%2225%22 text-anchor=%22middle%22 fill=%22%239ca3af%22 font-size=%2214%22>⚽</text></svg>'">
                 <div class="player-info">
                     <div class="player-name"><a href="#/player/${p.id}" style="color:inherit;text-decoration:none">${p.name}</a></div>
-                    <div class="player-meta">${p.country_code}</div>
+                    <div class="player-meta">${p.country_code}${p.club ? ' · ' + p.club : ''}</div>
                 </div>
                 ${posBadge(p.position)}
-                <div class="player-value">${formatMoney(p.market_value)}</div>
+                <span style="font-size:.8rem;color:var(--accent-teal);font-weight:600;min-width:36px;text-align:right" title="Puntos fantasy">${p.total_points || 0} pts</span>
+                <div class="player-value">${formatMoney(p.market_value || 0)}</div>
                 ${canPick ? `<button class="btn btn-primary btn-sm repo-pick-btn" data-pid="${p.id}">Pick</button>` : ''}
             </div>
         `).join('');
@@ -718,6 +738,7 @@ async function renderRepositionDraft(container, leagueId, windowId) {
         try {
             await loadState();
             await loadPlayers();
+            await loadTeam();
             const newPickCount = (state.draft_order || []).reduce((sum, o) => sum + (o.players_count || 0), 0);
             if (newPickCount !== lastPickCount) {
                 lastPickCount = newPickCount;
@@ -733,6 +754,7 @@ async function renderRepositionDraft(container, leagueId, windowId) {
 
     await loadState();
     await loadPlayers();
+    await loadTeam();
     lastPickCount = (state.draft_order || []).reduce((sum, o) => sum + (o.players_count || 0), 0);
     render();
 
