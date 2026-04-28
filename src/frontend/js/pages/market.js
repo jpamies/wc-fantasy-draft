@@ -664,7 +664,7 @@ async function loadRepositionDraft(leagueId, teamId, windowId) {
         const isMyTurn = state.current_turn_team_id === teamId;
 
         container.innerHTML = `
-            <h4>Jugadores Disponibles (sin minutos)</h4>
+            <h4>Jugadores Disponibles</h4>
             ${!isMyTurn ? '<p style="color:var(--text-muted);font-size:.85rem">⏳ Esperando turno…</p>' : ''}
             <div class="grid grid-2">
                 ${players.slice(0, 50).map(p => `

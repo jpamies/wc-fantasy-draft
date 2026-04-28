@@ -466,3 +466,115 @@ async def _set_clauses_for_one_bot(team_id: str, window_id: int, protect_budget:
         f"{len(blocked_ids)} blocked, {len(dead_players)} eliminated→SELL, "
         f"total={sum(c['clause_amount'] for c in clauses if not c['is_blocked'])}"
     )
+
+
+# Per-window lock so reposition autodraft cascades don't overlap.
+_reposition_locks: dict[int, "asyncio.Lock"] = {}
+
+
+def _get_reposition_lock(window_id: int):
+    import asyncio as _asyncio
+    lock = _reposition_locks.get(window_id)
+    if lock is None:
+        lock = _asyncio.Lock()
+        _reposition_locks[window_id] = lock
+    return lock
+
+
+async def process_reposition_autodraft(window_id: int, max_iterations: int = 100) -> int:
+    """Make picks for any bot whose turn is up in the reposition draft.
+
+    Stops when the next turn is a human or when no turns remain.
+    Returns the count of picks performed.
+    """
+    from src.backend.database import get_db
+    from src.backend.services.market_service import MarketService
+
+    lock = _get_reposition_lock(window_id)
+    if lock.locked():
+        # Another cascade is already running for this window.
+        return 0
+
+    picks_made = 0
+    async with lock:
+        for _ in range(max_iterations):
+            db = await get_db()
+            try:
+                # Window status check
+                win_rows = await db.execute_fetchall(
+                    "SELECT status, league_id FROM market_windows WHERE id=$1",
+                    (window_id,),
+                )
+                if not win_rows or win_rows[0]["status"] != "reposition_draft":
+                    return picks_made
+                league_id = win_rows[0]["league_id"]
+
+                # Find current pending pick
+                turn_rows = await db.execute_fetchall(
+                    """SELECT team_id, pick_number FROM reposition_draft_picks
+                       WHERE market_window_id=$1 AND player_id IS NULL AND is_pass=0
+                       ORDER BY pick_number LIMIT 1""",
+                    (window_id,),
+                )
+                if not turn_rows:
+                    return picks_made
+                team_id = turn_rows[0]["team_id"]
+
+                # Is this team a bot?
+                bot_rows = await db.execute_fetchall(
+                    "SELECT owner_nick FROM fantasy_teams WHERE id=$1", (team_id,)
+                )
+                if not bot_rows or not bot_rows[0]["owner_nick"].startswith("bot_"):
+                    return picks_made  # human's turn, stop cascade
+            finally:
+                await db.close()
+
+            # Pick the highest market_value alive player not yet owned in league.
+            available = await MarketService.get_reposition_available_players(
+                league_id=league_id, window_id=window_id
+            )
+            if not available:
+                # Pass the turn — nothing to pick
+                logger.info(f"Bot {team_id} has no available players, passing turn")
+                await MarketService.make_reposition_draft_pick(
+                    window_id=window_id, team_id=team_id, player_id=None
+                )
+                picks_made += 1
+                continue
+
+            # Choose: highest market_value player whose position is below cap.
+            db = await get_db()
+            try:
+                pos_rows = await db.execute_fetchall(
+                    """SELECT p.position, COUNT(*) as cnt
+                       FROM team_players tp JOIN players p ON tp.player_id=p.id
+                       WHERE tp.team_id=$1 GROUP BY p.position""",
+                    (team_id,),
+                )
+                pos_counts = {r["position"]: r["cnt"] for r in pos_rows}
+            finally:
+                await db.close()
+
+            POS_MAX = {"GK": 3, "DEF": 8, "MID": 8, "FWD": 8}
+            chosen = None
+            for p in available:
+                if pos_counts.get(p["position"], 0) < POS_MAX.get(p["position"], 99):
+                    chosen = p
+                    break
+
+            if chosen is None:
+                # No legal pick for this bot — pass.
+                logger.info(f"Bot {team_id} cannot fill any position, passing")
+                await MarketService.make_reposition_draft_pick(
+                    window_id=window_id, team_id=team_id, player_id=None
+                )
+            else:
+                logger.info(
+                    f"Bot {team_id} reposition pick: {chosen['name']} ({chosen['position']})"
+                )
+                await MarketService.make_reposition_draft_pick(
+                    window_id=window_id, team_id=team_id, player_id=chosen["id"]
+                )
+            picks_made += 1
+
+    return picks_made

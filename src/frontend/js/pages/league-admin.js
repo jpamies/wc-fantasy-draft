@@ -186,6 +186,11 @@ async function loadMarketsList(leagueId) {
                                         🤖 Cláusulas bots
                                     </button>
                                 ` : ''}
+                                ${w.status === 'reposition_draft' ? `
+                                    <button class="btn btn-sm btn-secondary btn-bot-repo" data-wid="${w.id}">
+                                        🤖 Autopick bots
+                                    </button>
+                                ` : ''}
                                 <a href="#/market/${w.id}" class="btn btn-sm btn-outline">Ver</a>
                             </td>
                         </tr>
@@ -235,6 +240,18 @@ async function loadMarketsList(leagueId) {
                 try {
                     const r = await API.post(`/leagues/${leagueId}/admin/market-windows/${btn.dataset.wid}/run-bot-clauses`, {});
                     showToast(`Cláusulas generadas para ${r.bots_processed} bots`, 'success');
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            });
+        });
+
+        container.querySelectorAll('.btn-bot-repo').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                try {
+                    const r = await API.post(`/leagues/${leagueId}/admin/market-windows/${btn.dataset.wid}/run-reposition-autodraft`, {});
+                    showToast(`Bots completaron ${r.picks_made} picks`, 'success');
+                    await loadMarketsList(leagueId);
                 } catch (err) {
                     showToast(err.message, 'error');
                 }

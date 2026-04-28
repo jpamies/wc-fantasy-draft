@@ -229,6 +229,16 @@ async def _market_auto_transition_watchdog():
                         finally:
                             await db.close()
 
+                    # While in reposition_draft, keep bots autopicking when it's their turn.
+                    elif status == "reposition_draft":
+                        try:
+                            from src.backend.services.bot_service import process_reposition_autodraft
+                            n = await process_reposition_autodraft(window["id"])
+                            if n:
+                                print(f"[market watchdog] window {window['id']}: {n} bot reposition picks")
+                        except Exception as e:
+                            print(f"[market watchdog] reposition autodraft error w{window['id']}: {e}")
+
                 except Exception as e:
                     print(f"[market watchdog] error transitioning window {window['id']}: {e}")
 

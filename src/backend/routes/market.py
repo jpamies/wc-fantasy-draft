@@ -253,6 +253,29 @@ async def run_bot_clauses(
         raise HTTPException(500, str(e))
 
 
+@router.post("/leagues/{league_id}/admin/market-windows/{window_id}/run-reposition-autodraft")
+async def run_reposition_autodraft(
+    league_id: str,
+    window_id: int,
+    current_team: dict = Depends(get_current_team),
+):
+    """Manually run the bot reposition-draft autopick cascade.
+
+    Useful to unblock a stalled draft (e.g. when bot logic shipped after the
+    draft already started).
+    """
+    if current_team.get("league_id") != league_id or not current_team.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from src.backend.services.bot_service import process_reposition_autodraft
+    try:
+        picks = await process_reposition_autodraft(window_id)
+        return {"ok": True, "picks_made": picks}
+    except Exception as e:
+        logger.error(f"run_reposition_autodraft failed: {e}")
+        raise HTTPException(500, str(e))
+
+
 
 @router.post("/leagues/{league_id}/admin/market-windows/{window_id}/force-advance")
 async def force_advance_market_phase(

@@ -606,12 +606,22 @@ class MarketService:
             )
 
             await db.commit()
-            return {"status": "reposition_draft", "draft_order": order}
+            result = {"status": "reposition_draft", "draft_order": order}
         except Exception as e:
             logger.error(f"Error starting reposition draft: {e}")
             raise
         finally:
             await db.close()
+
+        # Fire-and-forget bot autodraft cascade
+        try:
+            import asyncio
+            from src.backend.services.bot_service import process_reposition_autodraft
+            asyncio.create_task(process_reposition_autodraft(window_id))
+        except Exception as e:
+            logger.error(f"Failed to schedule reposition autodraft: {e}")
+
+        return result
 
     @staticmethod
     async def get_reposition_draft_state(window_id: int, team_id: str) -> Dict[str, Any]:
@@ -692,10 +702,15 @@ class MarketService:
     async def get_reposition_available_players(
         league_id: str, window_id: int
     ) -> List[Dict[str, Any]]:
-        """Get available players for reposition draft (players without minutes)."""
+        """Get available players for reposition draft.
+
+        Returns players that:
+          - are not currently in any team of this league, AND
+          - belong to a country that is still in the tournament (has at
+            least one match with status <> 'finished').
+        """
         db = await get_db()
         try:
-            # Players not currently in any team in this league
             players = await db.execute_fetchall(
                 """SELECT p.id, p.name, p.position, p.country_code, p.photo, p.market_value
                    FROM players p
@@ -704,6 +719,11 @@ class MarketService:
                        WHERE team_id IN (
                            SELECT id FROM fantasy_teams WHERE league_id = $1
                        )
+                   )
+                   AND EXISTS (
+                       SELECT 1 FROM matches m
+                       WHERE (m.home_country = p.country_code OR m.away_country = p.country_code)
+                         AND m.status <> 'finished'
                    )
                    ORDER BY p.market_value DESC""",
                 (league_id,),
@@ -800,9 +820,19 @@ class MarketService:
                 )
 
             await db.commit()
-            return {"success": True}
+            result = {"success": True}
         except Exception as e:
             logger.error(f"Error making reposition draft pick: {e}")
             raise
         finally:
             await db.close()
+
+        # If the next pending turn is a bot, fire-and-forget cascade.
+        try:
+            import asyncio
+            from src.backend.services.bot_service import process_reposition_autodraft
+            asyncio.create_task(process_reposition_autodraft(window_id))
+        except Exception as e:
+            logger.error(f"Failed to schedule reposition autodraft: {e}")
+
+        return result
