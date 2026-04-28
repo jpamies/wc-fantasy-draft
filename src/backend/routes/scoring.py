@@ -42,10 +42,10 @@ async def list_matchdays():
         some_finished = any(m.get("status") == "finished" for m in matches)
         all_finished = matches and all(m.get("status") == "finished" for m in matches)
 
-        if local_status:
-            md_status = local_status
-        elif all_finished:
+        if all_finished:
             md_status = "completed"
+        elif local_status:
+            md_status = local_status
         elif some_finished:
             md_status = "active"
         else:

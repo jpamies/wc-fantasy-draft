@@ -237,6 +237,25 @@ class MarketService:
                      AND pc.clause_amount = 0 AND pc.is_blocked = 0""",
                 (window_id, league_id),
             )
+
+            # Before mutating team_players, ensure snapshots exist for every
+            # already-started matchday so historical lineups survive the sale.
+            from src.backend.services.lineup_service import ensure_matchday_snapshot
+            started_mds = await db.execute_fetchall(
+                "SELECT id FROM matchdays WHERE status IN ('active','completed')"
+            )
+            league_team_rows = await db.execute_fetchall(
+                "SELECT id FROM fantasy_teams WHERE league_id=$1", (league_id,)
+            )
+            for md_row in started_mds:
+                for t_row in league_team_rows:
+                    try:
+                        await ensure_matchday_snapshot(t_row["id"], md_row["id"])
+                    except Exception as e:
+                        logger.warning(
+                            f"Snapshot failed for team {t_row['id']} md {md_row['id']}: {e}"
+                        )
+
             released = 0
             for row in sell_rows:
                 team_id = row["team_id"]
@@ -246,9 +265,15 @@ class MarketService:
                     "DELETE FROM team_players WHERE team_id=$1 AND player_id=$2",
                     (team_id, player_id),
                 )
-                # Remove from any future-locked lineups (best-effort)
+                # Remove from FUTURE matchday lineups only — preserve history
+                # (snapshots of already-played matchdays must keep this player
+                # so points and lineup display remain accurate).
                 await db.execute(
-                    "DELETE FROM matchday_lineups WHERE team_id=$1 AND player_id=$2",
+                    """DELETE FROM matchday_lineups
+                       WHERE team_id=$1 AND player_id=$2
+                         AND matchday_id IN (
+                             SELECT id FROM matchdays WHERE status NOT IN ('active','completed')
+                         )""",
                     (team_id, player_id),
                 )
                 released += 1
