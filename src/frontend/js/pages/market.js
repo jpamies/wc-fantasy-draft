@@ -350,14 +350,22 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
             const blocked = !!c?.is_blocked;
             const flag = flagFor(p);
             const points = p.total_points ?? 0;
+            const alive = p.is_alive !== false; // default true if backend hasn't shipped yet
+            const aliveDot = alive
+                ? `<span title="Sigue en el torneo" aria-label="alive" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent-teal,#22c55e);box-shadow:0 0 4px var(--accent-teal,#22c55e);margin-right:.3rem;vertical-align:middle"></span>`
+                : `<span title="Eliminado del torneo" aria-label="eliminated" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-muted,#777);margin-right:.3rem;vertical-align:middle"></span>`;
+            const eliminatedTag = !alive
+                ? ` <span style="color:var(--text-muted);font-size:.65rem;font-style:italic" title="Su selección está eliminada">· eliminado</span>`
+                : '';
+            const cardOpacity = alive ? '' : 'opacity:.75;';
             return `
             <div class="card clause-card" data-pid="${p.player_id}" data-pos="${p.position}" data-amount="${amount}" data-blocked="${blocked ? '1' : '0'}"
-                style="padding:.75rem;display:flex;flex-direction:column;gap:.5rem">
+                style="padding:.75rem;display:flex;flex-direction:column;gap:.5rem;${cardOpacity}">
                 <div style="display:flex;align-items:center;gap:.5rem">
-                    <div style="flex:0 0 auto">${flag}</div>
+                    <div style="flex:0 0 auto;position:relative">${flag}</div>
                     <div style="flex:1;min-width:0">
-                        <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.name}">${p.name}</div>
-                        <div style="font-size:.7rem;color:var(--text-muted)">${p.country_code} · ${p.club || ''}</div>
+                        <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.name}">${aliveDot}${p.name}</div>
+                        <div style="font-size:.7rem;color:var(--text-muted)">${p.country_code} · ${p.club || ''}${eliminatedTag}</div>
                     </div>
                     <span class="badge ${positionBadgeClass(p.position)} badge-small">${p.position}</span>
                 </div>

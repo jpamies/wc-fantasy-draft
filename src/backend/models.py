@@ -112,6 +112,7 @@ class TeamPlayerOut(BaseModel):
     bench_order: int = 0
     acquired_via: str = "draft"
     total_points: int = 0
+    is_alive: bool = True
 
 class LineupUpdate(BaseModel):
     formation: Optional[str] = None
