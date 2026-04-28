@@ -23,8 +23,8 @@ Draft con snake order, mercado de traspasos con clausulazos, puntuación en vivo
 | Capa | Tecnología |
 |---|---|
 | Frontend | HTML + CSS + Vanilla JS (SPA, hash router con params dinámicos, tema oscuro) |
-| Backend | Python 3.11 + FastAPI + WebSocket (aiosqlite) |
-| Base de datos | **SQLite** (WAL mode) con PVC persistente en K8s |
+| Backend | Python 3.11 + FastAPI + WebSocket (asyncpg) |
+| Base de datos | **PostgreSQL 16** via asyncpg (pool min=2, max=10) |
 | Auth | JWT (HS256) — código de liga + nickname, sin passwords |
 | HTTP Client | httpx (async, para comunicación con wc-simulator) |
 | CI/CD | GitHub Actions → GHCR (multi-arch amd64+arm64) → auto-update k8s-homepi |
@@ -39,7 +39,7 @@ Todas con prefijo `WCF_`:
 | Variable | Default | Descripción |
 |----------|---------|-------------|
 | `WCF_SECRET_KEY` | `wc-fantasy-2026-dev-secret...` | JWT signing secret |
-| `WCF_DATABASE_PATH` | `data/wc_fantasy.db` | Ruta al fichero SQLite |
+| `WCF_DATABASE_URL` | `postgresql://wcadmin:...@localhost:5432/wc_fantasy` | PostgreSQL connection URL |
 | `WCF_SIMULATOR_API_URL` | `""` | URL del wc-simulator (vacío = modo local) |
 | `WCF_CORS_ORIGINS` | `*` | CORS origins |
 | `WCF_JWT_ALGORITHM` | `HS256` | Algoritmo JWT |
@@ -56,7 +56,11 @@ Todas con prefijo `WCF_`:
                ┌───────┴───────┐
                │  wc-fantasy   │
                │  FastAPI:8000 │
-               │  SQLite (PVC) │
+               └───────┬───────┘
+                       │ asyncpg
+               ┌───────┴───────┐
+               │postgres-fantasy│
+               │  PG 16 (PVC)  │
                └───────┬───────┘
                        │ httpx (async)
                ┌───────┴───────┐
@@ -77,11 +81,11 @@ Todas con prefijo `WCF_`:
    - Calcula puntos fantasy por jugador
    - Crea snapshots de alineaciones
    - Recalcula puntos de equipos (incluye swaps mid-matchday)
-3. **Datos locales**: SQLite solo guarda ligas, equipos, lineups, scores, drafts, transfers
+3. **Datos locales**: PostgreSQL guarda ligas, equipos, lineups, scores, drafts, transfers, market windows
 
-## Base de datos (SQLite)
+## Base de datos (PostgreSQL)
 
-14 tablas:
+18 tablas:
 
 | Tabla | Propósito |
 |-------|-----------|
@@ -99,6 +103,11 @@ Todas con prefijo `WCF_`:
 | `match_scores` | Puntuaciones individuales por partido (goles, asist, tarjetas, pts fantasy) |
 | `matchday_lineups` | Alineación por equipo por jornada (snapshot, bloqueos por país jugado) |
 | `sync_state` | Estado del último sync |
+| `market_windows` | Ventanas de mercado (fases, deadlines) |
+| `player_clauses` | Cláusulas de rescisión |
+| `market_budgets` | Presupuestos de mercado |
+| `market_transactions` | Historial de transacciones |
+| `reposition_draft_picks` | Picks de reposición post-mercado |
 
 ## API Endpoints
 

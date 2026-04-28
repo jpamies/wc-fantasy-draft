@@ -1,7 +1,7 @@
 # Modelo de Datos — WC Fantasy 2026
 
-> Diseño del modelo de datos. Representado como esquema conceptual que se
-> implementará primero en JSON (v1), luego SQLite (v2), y PostgreSQL (v3).
+> Esquema de entidades implementado en **PostgreSQL 16** via `asyncpg`.
+> Definición completa en `src/backend/database.py` (`init_db()`).
 
 ---
 

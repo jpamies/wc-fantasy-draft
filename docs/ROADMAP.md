@@ -22,7 +22,7 @@ Mayo 2026         Junio 2026                    Julio 2026
 
 ## Fase 0 — Diseño y planificación ✅
 
-**Estado**: En curso  
+**Estado**: Completada  
 **Duración**: Abril 2026
 
 | Tarea | Estado |
@@ -40,67 +40,73 @@ Mayo 2026         Junio 2026                    Julio 2026
 
 ---
 
-## Fase 1 — Datos y backend base
+## Fase 1 — Datos y backend base ✅
 
-**Objetivo**: API funcional con datos de jugadores y CRUD de ligas  
-**Duración estimada**: ~2 semanas
+**Estado**: Completada  
+**Objetivo**: API funcional con datos de jugadores y CRUD de ligas
 
 ### 1.1 Preparación de datos
-- [ ] Script para convertir JSONs de world-cup-list al formato WC Fantasy
-- [ ] Añadir campo `clause_value` (market_value × 1.5)
-- [ ] Validar datos: todos los jugadores con foto, posición, club
-- [ ] Crear `tournaments/groups.json` con los grupos del Mundial
-- [ ] Crear `tournaments/calendar.json` con el calendario de partidos
+- [x] Script para convertir JSONs de world-cup-list al formato WC Fantasy
+- [x] Añadir campo `clause_value` (market_value × 1.5)
+- [x] Validar datos: todos los jugadores con foto, posición, club
+- [x] Crear `tournaments/groups.json` con los grupos del Mundial
+- [x] Crear `tournaments/calendar.json` con el calendario de partidos
 
 ### 1.2 Backend — FastAPI scaffold
-- [ ] Setup FastAPI con uvicorn
-- [ ] Estructura de carpetas (models, routes, services)
-- [ ] Config desde variables de entorno
-- [ ] CORS configurado
-- [ ] Health check endpoint
+- [x] Setup FastAPI con uvicorn
+- [x] Estructura de carpetas (models, routes, services)
+- [x] Config desde variables de entorno
+- [x] CORS configurado
+- [x] Health check endpoint
 
 ### 1.3 Catálogo de jugadores API
-- [ ] `GET /api/v1/players` con filtros (país, posición, búsqueda)
-- [ ] `GET /api/v1/players/{id}` detalle
-- [ ] JsonStore: leer datos desde ficheros JSON
+- [x] `GET /api/v1/players` con filtros (país, posición, búsqueda)
+- [x] `GET /api/v1/players/{id}` detalle
+- [x] Datos via wc-simulator API (proxy en tiempo real)
 
 ### 1.4 Ligas API
-- [ ] `POST /api/v1/leagues` crear liga
-- [ ] `GET /api/v1/leagues/{id}` consultar liga
-- [ ] `POST /api/v1/auth/join` unirse a liga
-- [ ] Generación de JWT para sesión
-- [ ] JsonStore: persistir ligas en ficheros
+- [x] `POST /api/v1/leagues` crear liga
+- [x] `GET /api/v1/leagues/{id}` consultar liga
+- [x] `POST /api/v1/auth/join` unirse a liga
+- [x] Generación de JWT para sesión
+- [x] PostgreSQL: persistir ligas en BD
 
 ### 1.5 Tests
+- [x] Smoke test básico
 - [ ] Tests unitarios para modelos
 - [ ] Tests de integración para endpoints
-- [ ] Makefile con `make test`
 
 ---
 
-## Fase 2 — Draft
+## Fase 2 — Draft ✅
 
-**Objetivo**: Draft funcional con WebSocket  
-**Duración estimada**: ~2 semanas
+**Estado**: Completada  
+**Objetivo**: Draft funcional con WebSocket
 
 ### 2.1 Motor de draft
-- [ ] Lógica de turnos (aleatorio + serpenteo)
-- [ ] Timer por pick (configurable)
-- [ ] Auto-pick por preferencias
-- [ ] Validación de mínimos por posición
+- [x] Lógica de turnos (aleatorio + serpenteo)
+- [x] Timer por pick (configurable)
+- [x] Auto-pick por preferencias
+- [x] Validación de mínimos por posición
+- [x] Cola de draft (pre-selección)
+- [x] AutoDraft inteligente (composición balanceada)
+- [x] Bots (autodraft automático para ligas con menos humanos)
 
 ### 2.2 API de draft
-- [ ] `POST /draft/start` — iniciar draft
-- [ ] `POST /draft/pick` — seleccionar jugador
-- [ ] `GET /draft` — estado actual
-- [ ] WebSocket `/draft/ws` — tiempo real
+- [x] `POST /draft/start` — iniciar draft
+- [x] `POST /draft/pick` — seleccionar jugador
+- [x] `GET /draft` — estado actual
+- [x] WebSocket `/draft/ws` — tiempo real
+- [x] `POST /draft/autodraft` — toggle autodraft (fire-and-forget)
+- [x] `POST /draft/queue/add` — añadir a cola
 
 ### 2.3 Frontend — Draft UI
-- [ ] Sala de draft: lista de jugadores disponibles
-- [ ] Timer visual con countdown
-- [ ] Log de picks en tiempo real
-- [ ] Indicador de turno
-- [ ] Auto-pick config (preferencias de posición)
+- [x] Sala de draft: lista de jugadores disponibles
+- [x] Timer visual con countdown
+- [x] Log de picks en tiempo real
+- [x] Indicador de turno
+- [x] Auto-pick config (preferencias de posición)
+- [x] Cola de draft interactiva
 
 ### 2.4 Tests
 - [ ] Test del motor de draft (turnos, serpenteo, timer)
@@ -108,98 +114,105 @@ Mayo 2026         Junio 2026                    Julio 2026
 
 ---
 
-## Fase 3 — Gestión de equipo y alineación
+## Fase 3 — Gestión de equipo y alineación ✅
 
-**Objetivo**: Usuarios pueden gestionar su equipo  
-**Duración estimada**: ~1 semana
+**Estado**: Completada  
+**Objetivo**: Usuarios pueden gestionar su equipo
 
 ### 3.1 API de equipos
-- [ ] `GET /teams/{id}` — plantilla completa
-- [ ] `PATCH /teams/{id}/lineup` — cambiar alineación, formación, capitán
+- [x] `GET /teams/{id}` — plantilla completa
+- [x] `PATCH /teams/{id}/lineup` — cambiar alineación, formación, capitán
+- [x] `GET /teams/{id}/matchday-lineup/{md}` — alineación por jornada
+- [x] `PATCH /teams/{id}/matchday-lineup/{md}` — actualizar (con bloqueo mid-matchday)
+- [x] Auto-alineación (mejores 11 por media de puntos)
 
 ### 3.2 Frontend — Mi equipo
-- [ ] Vista de plantilla con formación visual (campo de fútbol)
-- [ ] Drag & drop para cambiar titulares/suplentes
-- [ ] Selector de formación
-- [ ] Selector de capitán y vice-capitán
-- [ ] Contador de deadline
+- [x] Vista de plantilla con formación visual (campo de fútbol)
+- [x] Drag & drop para cambiar titulares/suplentes
+- [x] Selector de formación
+- [x] Selector de capitán y vice-capitán
+- [x] Bloqueo mid-matchday (🔒 jugadores cuyo país ya jugó)
+- [x] Puntos por jornada en la vista de equipo
 
 ---
 
-## Fase 4 — Puntuación
+## Fase 4 — Puntuación ✅
 
-**Objetivo**: Puntuación automática basada en datos reales  
-**Duración estimada**: ~2 semanas
+**Estado**: Completada  
+**Objetivo**: Puntuación automática sincronizada con wc-simulator
 
-### 4.1 Scripts de datos
-- [ ] `fetch_scores.py` — obtener datos de SofaScore/Football-Data
-- [ ] Mapeo de player IDs (WC Fantasy ↔ fuentes externas)
-- [ ] Cálculo de puntos según tabla de SCORING.md
-- [ ] `update_standings.py` — calcular clasificación
+### 4.1 Sync de datos
+- [x] `POST /scoring/sync` — obtener datos de wc-simulator
+- [x] Mapeo automático de jugadores (lazy creation en BD)
+- [x] Cálculo de puntos según tabla de SCORING.md
+- [x] Clasificación con desglose por jornada
 
 ### 4.2 API de puntuación
-- [ ] `GET /scoring/matchdays` — jornadas
-- [ ] `GET /scoring/matchdays/{id}` — puntuaciones
-- [ ] `GET /scoring/live` — puntuaciones en vivo
-- [ ] SSE `/scoring/live/stream` — stream en tiempo real
+- [x] `GET /scoring/matchdays` — calendario del simulador
+- [x] `GET /scoring/matchdays/{id}` — partidos + scores
+- [x] `GET /scoring/leaderboard` — leaderboard completo
+- [x] `GET /leagues/{id}/standings` — clasificación interactiva
 
 ### 4.3 Frontend — Puntuaciones
-- [ ] Vista de jornada: partidos + puntuaciones
-- [ ] Puntuación en vivo durante partidos
-- [ ] Desglose de puntos por jugador
-- [ ] Clasificación de la liga con gráfico de evolución
+- [x] Vista de jornada: partidos + puntuaciones
+- [x] Desglose de puntos por jugador
+- [x] Clasificación interactiva (General / Por Jornada)
+- [x] Click en equipo → ver alineación con puntos
+- [x] Ficha de jugador: atributos, stats, historial de puntos
 
-### 4.4 GitHub Actions
-- [ ] Cron job: actualizar datos de jugadores (diario)
-- [ ] Cron job: fetch scores durante días de partido (cada 5 min)
+### 4.4 Background tasks
+- [x] `_autodraft_watchdog` (cada 120s, reanuda drafts)
+- [x] `_market_auto_transition_watchdog` (cada 60s, transiciona ventanas)
+- [x] `_auto_market_window_creator` (cada 60s, crea ventanas al cambiar de fase)
 
 ---
 
-## Fase 5 — Mercado de traspasos 🆕
+## Fase 5 — Mercado de traspasos ✅ 🆕
 
-**Objetivo**: Clausulazos, ofertas, mercado libre  
-**Duración estimada**: ~2 semanas
+**Estado**: Completada  
+**Objetivo**: Clausulazos, ofertas, mercado libre, ventanas automáticas
 
 ### 5.1 Motor de traspasos
-- [ ] Ofertas directas (proponer intercambio)
-- [ ] Clausulazos (compra inmediata por cláusula)
-- [ ] Mercado libre (pujas ciegas)
-- [ ] Liberación de jugadores
-- [ ] Validaciones: presupuesto, límites, ventana abierta
+- [x] Ofertas directas (proponer intercambio)
+- [x] Clausulazos (compra inmediata por cláusula)
+- [x] Mercado libre (pujas ciegas)
+- [x] Liberación de jugadores
+- [x] Validaciones: presupuesto, límites, ventana abierta
+- [x] Ventanas de mercado automáticas entre fases del torneo
+- [x] Transición automática de fases: clause_window → market_open → reposition_draft
 
 ### 5.2 API de mercado
-- [ ] `POST /market/offer` — crear oferta
-- [ ] `POST /market/offer/{id}/respond` — aceptar/rechazar
-- [ ] `POST /market/clause` — ejecutar clausulazo
-- [ ] `POST /market/bid` — pujar por agente libre
-- [ ] `POST /market/release` — liberar jugador
-- [ ] `POST /admin/veto/{id}` — vetar traspaso
+- [x] `POST /market/clause` — ejecutar clausulazo
+- [x] `POST /market/offer` — crear oferta
+- [x] `POST /market/bid` — pujar por agente libre
+- [x] `GET /leagues/{id}/market` — estado del mercado
 
 ### 5.3 Frontend — Mercado
-- [ ] Panel de mercado: jugadores libres, ofertas pendientes
-- [ ] Interfaz de clausulazo (confirmar compra)
-- [ ] Sistema de ofertas y contraofertas
-- [ ] Historial de traspasos
-- [ ] Notificaciones de ofertas recibidas
+- [x] Panel de mercado: jugadores libres, ofertas pendientes
+- [x] Interfaz de clausulazo (confirmar compra)
+- [x] Sistema de ofertas y contraofertas
+- [x] Historial de traspasos
 
 ---
 
-## Fase 6 — Polish y lanzamiento
+## Fase 6 — Polish y lanzamiento 🚧
 
-**Objetivo**: Listo para usar con amigos  
+**Estado**: En curso  
 **Deadline**: 28 mayo 2026 (2 semanas antes del Mundial)
 
 ### 6.1 UX/UI
-- [ ] Diseño responsive (mobile-first)
-- [ ] Modo oscuro
+- [x] Diseño responsive (mobile-first)
+- [x] Modo oscuro
 - [ ] Animaciones y transiciones
-- [ ] Loading states y error handling
+- [x] Loading states y error handling
 
 ### 6.2 Despliegue
-- [ ] Frontend → GitHub Pages
-- [ ] Backend → Fly.io
-- [ ] CI/CD con GitHub Actions
-- [ ] Dominio propio (opcional)
+- [x] Frontend servido por FastAPI (estáticos)
+- [x] Backend → K3s en Raspberry Pi (GHCR + Flux CD)
+- [x] PostgreSQL → StatefulSet dedicado (`postgres-fantasy`)
+- [x] Cloudflare Tunnel (HTTPS)
+- [x] PodDisruptionBudgets + RollingUpdate zero-downtime
+- [x] GitHub Actions CI/CD (multi-arch)
 
 ### 6.3 Testing con amigos
 - [ ] Liga de prueba con 4-8 participantes
@@ -212,7 +225,7 @@ Mayo 2026         Junio 2026                    Julio 2026
 
 Mejoras incrementales mientras se juega:
 
-- [ ] Migración de JSON → SQLite
+- [x] Migración a PostgreSQL (completada ADR-010)
 - [ ] OAuth (GitHub/Google) para persistencia
 - [ ] Notificaciones push (via PWA)
 - [ ] Estadísticas avanzadas (xG, pases completados, etc.)
@@ -226,20 +239,20 @@ Mejoras incrementales mientras se juega:
 ## Prioridades
 
 ```
-MUST HAVE (MVP - Fases 1-3)
+MUST HAVE (MVP - Fases 1-3) ✅ COMPLETADO
 ├── Catálogo de jugadores
 ├── Crear/unirse a ligas
 ├── Draft funcional
 ├── Gestión de equipo y alineación
-└── Clasificación básica (puntos manuales si hace falta)
+└── Clasificación con puntuación automática
 
-SHOULD HAVE (Fases 4-5)
-├── Puntuación automática
+SHOULD HAVE (Fases 4-5) ✅ COMPLETADO
+├── Puntuación automática (sync con wc-simulator)
 ├── Mercado de traspasos
 ├── Clausulazos
-└── Puntuación en vivo
+└── Ventanas de mercado automáticas
 
-NICE TO HAVE (Fase 6-7)
+NICE TO HAVE (Fase 6-7) 🚧 EN CURSO
 ├── OAuth
 ├── Mobile PWA
 ├── Estadísticas avanzadas

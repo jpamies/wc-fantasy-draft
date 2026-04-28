@@ -3,8 +3,7 @@
 ## Visión general
 
 WC Fantasy es una webapp de fantasy football para el Mundial 2026 con dos componentes principales:
-un **frontend estático** que consume una **API REST** respaldada por una base de datos que evoluciona
-desde ficheros JSON hasta una base de datos relacional.
+un **frontend estático** que consume una **API REST** respaldada por **PostgreSQL** via `asyncpg`.
 
 ## Diagrama de alto nivel
 
@@ -53,12 +52,9 @@ desde ficheros JSON hasta una base de datos relacional.
 ┌────────────────────┐  ┌────────────────────────┐
 │    BASE DE DATOS   │  │   FUENTES EXTERNAS     │
 │                    │  │                        │
-│  v1: JSON files    │  │  ├── Transfermarkt     │
-│  v2: SQLite        │  │  │   (scraping)        │
-│  v3: PostgreSQL    │  │  ├── SofaScore API     │
-│                    │  │  │   (puntuaciones)    │
-│                    │  │  └── world-cup-list    │
-│                    │  │      (datos base)      │
+│  PostgreSQL 16     │  │  └── wc-simulator API  │
+│  (asyncpg pool)    │  │      (jugadores,       │
+│                    │  │       partidos, stats)  │
 └────────────────────┘  └────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐

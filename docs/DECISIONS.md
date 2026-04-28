@@ -70,7 +70,7 @@ integración con fuentes de datos externas (scraping), y evolución de base de d
 
 ## ADR-003: Base de datos con evolución progresiva (JSON → SQLite → PostgreSQL)
 
-**Estado**: Aceptada  
+**Estado**: Completada (PostgreSQL en producción desde abril 2026)  
 **Fecha**: 2026-04-20
 
 ### Contexto
@@ -97,6 +97,11 @@ Patrón **Repository** que abstrae el almacenamiento. Tres implementaciones:
 - (+) Migración transparente para el resto del código
 - (-) Mantener 2-3 implementaciones del store
 - (-) JsonStore no soporta concurrencia real (aceptable para MVP)
+
+> **Nota (abril 2026)**: La evolución se completó. En producción se usa
+> PostgreSQL 16 via `asyncpg` con un `PgConnection` wrapper que emula la
+> interfaz de aiosqlite. SQLite y JSON stores ya no se usan. El patrón
+> Repository no se implementó; en su lugar, un wrapper fino sobre asyncpg.
 
 ---
 
@@ -237,7 +242,7 @@ para clausulazos y pujas?
 
 ## ADR-009: SQLite por liga como estrategia de escalado
 
-**Estado**: Propuesta (no implementada)  
+**Estado**: Superada (PostgreSQL reemplaza SQLite)  
 **Fecha**: 2026-04-21
 
 ### Contexto
@@ -278,3 +283,70 @@ o cuando haya 50+ ligas activas simultáneas.
 ### Cambio necesario
 Solo afecta a `database.py` (cambiar path del DB según `league_id`).
 El schema SQL no cambia.
+
+> **Nota (abril 2026)**: Esta propuesta queda superada por la migración
+> a PostgreSQL (ADR-010). Postgres maneja la concurrencia entre ligas sin
+> necesidad de separar ficheros.
+
+---
+
+## ADR-010: Migración de SQLite a PostgreSQL
+
+**Estado**: Implementada  
+**Fecha**: 2026-04-28
+
+### Contexto
+SQLite con WAL mode funcionaba para el MVP, pero la concurrencia de escritura
+(múltiples ligas activas, autodraft de bots, sync de scoring, mercado)
+empezaba a generar `database is locked` bajo carga. Además, el deploy en K8s
+con PVC y single-writer era frágil ante pod restarts.
+
+### Decisión
+Migrar a **PostgreSQL 16-alpine** via `asyncpg 0.30.0`:
+- StatefulSet `postgres-fantasy` en K8s con PVC dedicado
+- Connection pool (min=2, max=10) gestionado por asyncpg
+- `PgConnection` wrapper en `database.py` que emula la interfaz de aiosqlite
+  (`execute`, `execute_fetchall`, `fetchval`, `commit`, `rollback`)
+- Env var `WCF_DATABASE_URL` para la connection string
+
+### Cambios clave
+- `?` placeholders → `$1, $2, ...` (asyncpg/libpq)
+- `INSERT OR IGNORE` → `ON CONFLICT DO NOTHING`
+- `INSERT OR REPLACE` → `ON CONFLICT DO UPDATE`
+- `cursor.lastrowid` → `RETURNING id`
+- `aiosqlite` eliminado de requirements; `asyncpg` añadido
+- Dynamic IN-clauses: `",".join(f"${i+OFFSET}" for i in range(len(items)))`
+
+### Consecuencias
+- (+) Concurrencia de escritura real (MVCC)
+- (+) Preparado para múltiples réplicas del pod fantasy
+- (+) Mejor integridad referencial y tipos
+- (-) Requiere un pod adicional (postgres-fantasy StatefulSet)
+- (-) El wrapper PgConnection añade indirección, pero mantiene compatibilidad
+
+---
+
+## ADR-011: Autodraft fire-and-forget con lock por liga
+
+**Estado**: Implementada  
+**Fecha**: 2026-04-28
+
+### Contexto
+El endpoint `toggle_autodraft` esperaba (`await`) a que toda la cascada de
+picks de bots terminara antes de devolver 200. En ligas con 6 bots, esto
+podía tardar >10 segundos (1s delay × picks restantes), bloqueando la UI
+y haciendo que el botón de autodraft nunca pareciera activarse.
+
+### Decisión
+- Todos los call-sites que disparan `_process_and_broadcast_autodraft` usan
+  `asyncio.create_task` (fire-and-forget).
+- Un `asyncio.Lock` por liga previene cascadas concurrentes.
+- `DraftEngine.process_autodraft(max_iterations=1)` — 1 pick por llamada,
+  el outer loop pone `sleep(1.0)` entre broadcasts para UX realista.
+
+### Consecuencias
+- (+) El HTTP response vuelve instantáneamente
+- (+) La UI actualiza el botón de autodraft sin delay
+- (+) Los picks llegan por WebSocket con ritmo realista (1 pick/segundo)
+- (-) Si el pod se reinicia mid-cascada, el `_autodraft_watchdog` (cada 120s)
+  retoma la cascada automáticamente

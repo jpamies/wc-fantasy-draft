@@ -1,7 +1,7 @@
 # Sistema de Puntuación — WC Fantasy 2026
 
 > Detalle completo de cómo se calculan los puntos.
-> Fuentes de datos: SofaScore (ratings), Football-Data.org (eventos), entrada manual (fallback).
+> Fuente de datos: **wc-simulator API** (`POST /scoring/sync` cada 60s).
 
 ---
 
@@ -88,30 +88,21 @@ Cuando un titular tiene 0 minutos jugados:
 
 ---
 
-## 5. Fuentes de datos para puntuación
+## 5. Fuente de datos para puntuación
 
-### Prioridad de fuentes
+### wc-simulator API
+
+El fantasy sincroniza resultados del **wc-simulator** (repo hermano):
 
 ```
-1. SofaScore API        →  Ratings, stats detalladas
-2. Football-Data.org    →  Eventos (goles, tarjetas, sustituciones)
-3. Entrada manual       →  Fallback por el comisionado
+POST /scoring/sync  →  GET wc-simulator/matches/finished-with-stats
+                    →  Calcula puntos fantasy por jugador
+                    →  Crea snapshots de alineaciones
+                    →  Recalcula puntos de equipos
 ```
 
-### Mapeo de datos SofaScore → Puntos
-
-| Campo SofaScore | Uso en WC Fantasy |
-|---|---|
-| `rating` | MVP (≥8.0 = más alto del partido) |
-| `goals` | Puntos por gol según posición |
-| `assists` | Puntos por asistencia |
-| `minutesPlayed` | Titular vs suplente, clean sheet elegibilidad |
-| `yellowCards` | Penalización |
-| `redCards` | Penalización |
-| `ownGoals` | Penalización |
-| `savedPenalties` | Bonus GK |
-| `saves` | Bonus GK (cada 3) |
-| `goalsConceded` | Penalización GK/DEF |
+Los datos de partidos (goles, asistencias, tarjetas, minutos, rating) provienen
+del motor de simulación EFEM con 244k+ jugadores.
 
 ### Timing de actualización
 
