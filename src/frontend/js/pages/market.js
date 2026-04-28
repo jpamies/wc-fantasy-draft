@@ -3,6 +3,7 @@
 // List view: #/market
 Router.register('#/market', async (container) => {
     const leagueId = API.getLeagueId();
+    const teamId = API.getTeamId();
     const currentTeam = API.getCurrentTeam();
 
     try {
@@ -24,12 +25,21 @@ Router.register('#/market', async (container) => {
             return `<span class="badge ${m.cls}">${m.txt}</span>`;
         };
 
+        // Find the next protectable window: first one not yet open for buying.
+        // Order: clause_window (active) > pending (next up). Skips market_open/closed/completed.
+        const protectable = (windows || []).find(w => w.status === 'clause_window')
+            || (windows || []).find(w => w.status === 'pending');
+
+        const headerHtml = `
+            <div class="flex-between mb-2">
+                <h2>🏪 Mercados</h2>
+                ${adminLink}
+            </div>
+        `;
+
         if (!windows || windows.length === 0) {
             container.innerHTML = `
-                <div class="flex-between mb-2">
-                    <h2>🏪 Mercados</h2>
-                    ${adminLink}
-                </div>
+                ${headerHtml}
                 <div class="card text-center">
                     <p style="color:var(--text-muted)">No hay mercados creados aún.</p>
                     ${currentTeam?.is_commissioner ? '<p>Crea uno desde la página de administración.</p>' : ''}
@@ -38,11 +48,31 @@ Router.register('#/market', async (container) => {
             return;
         }
 
+        // Clause protection block — shown ABOVE the windows list whenever there
+        // is a protectable window (pending or clause_window). Reuses the same
+        // form used inside the per-window detail page.
+        let clausesHtml = '';
+        if (teamId && protectable) {
+            const phaseLabel = protectable.phase || protectable.market_type || '';
+            const stateLabel = protectable.status === 'clause_window'
+                ? 'Cláusulas activas'
+                : 'Próximo mercado';
+            clausesHtml = `
+                <div class="card mb-2">
+                    <div class="card-header">🔐 Protección de Cláusulas — ${stateLabel} (${phaseLabel})</div>
+                    <p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1rem">
+                        Distribuye ${formatMoney(protectable.protect_budget)} entre tus jugadores. Máx 2 bloqueados (no pueden ser robados).
+                        Las cláusulas guardadas se aplicarán en la siguiente ventana de mercado.
+                    </p>
+                    <div id="clauses-form"></div>
+                    <button class="btn btn-primary mt-1" id="btn-save-clauses">Guardar Cláusulas</button>
+                </div>
+            `;
+        }
+
         container.innerHTML = `
-            <div class="flex-between mb-2">
-                <h2>🏪 Mercados</h2>
-                ${adminLink}
-            </div>
+            ${headerHtml}
+            ${clausesHtml}
             <div class="card">
                 <div class="card-header">📋 Ventanas de Mercado</div>
                 <table style="width:100%;font-size:.9rem">
@@ -57,7 +87,7 @@ Router.register('#/market', async (container) => {
                                 <td>${w.phase}</td>
                                 <td>${w.market_type || '—'}</td>
                                 <td>${statusBadge(w.status)}</td>
-                                <td>${formatMadrid(w.clause_window_start)}</td>
+                                <td>${w.clause_window_start ? formatMadrid(w.clause_window_start) : '—'}</td>
                                 <td><a href="#/market/${w.id}" class="btn btn-sm btn-primary">Abrir</a></td>
                             </tr>
                         `).join('')}
@@ -65,6 +95,13 @@ Router.register('#/market', async (container) => {
                 </table>
             </div>
         `;
+
+        // Load the clause form using the existing helper (works for both
+        // pending and clause_window — backend allows save in any state).
+        if (teamId && protectable) {
+            const clauses = await API.get(`/teams/${teamId}/market/${protectable.id}/clauses`);
+            await loadClauseForm(leagueId, teamId, protectable.id, clauses, protectable);
+        }
     } catch (err) {
         container.innerHTML = `<div class="card text-center"><p>Error: ${err.message}</p></div>`;
         console.error(err);
