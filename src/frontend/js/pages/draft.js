@@ -736,19 +736,26 @@ async function renderRepositionDraft(container, leagueId, windowId) {
     async function refresh() {
         if (!alive) return;
         try {
+            const prevTurn = state ? state.current_turn_team_id : null;
+            const prevStatus = state ? state.status : null;
+            const prevSquadSize = (team.players || []).length;
             await loadState();
             await loadPlayers();
             await loadTeam();
             const newPickCount = (state.draft_order || []).reduce((sum, o) => sum + (o.players_count || 0), 0);
-            if (newPickCount !== lastPickCount) {
+            const turnChanged = prevTurn !== state.current_turn_team_id;
+            const statusChanged = prevStatus !== state.status;
+            const squadChanged = prevSquadSize !== (team.players || []).length;
+            const becameMyTurn = state.current_turn_team_id === teamId && prevTurn !== teamId;
+
+            if (newPickCount !== lastPickCount || turnChanged || statusChanged || squadChanged) {
                 lastPickCount = newPickCount;
                 render();
-                if (state.current_turn_team_id === teamId && state.status !== 'completed') {
+                if (becameMyTurn && state.status !== 'completed') {
                     showToast('🔔 ¡Es tu turno!', 'success');
                 }
-            } else {
-                render();
             }
+            // else: nothing changed → keep current DOM (user may be typing in search)
         } catch (err) { console.error('Reposition refresh error:', err); }
     }
 

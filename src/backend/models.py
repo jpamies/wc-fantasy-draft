@@ -359,6 +359,7 @@ class RepositionDraftOrderEntry(BaseModel):
     def_count: int = 0
     mid_count: int = 0
     fwd_count: int = 0
+    pick_number: int = 0
 
 class RepositionDraftState(BaseModel):
     status: str  # 'waiting_turn', 'your_turn', 'completed'
