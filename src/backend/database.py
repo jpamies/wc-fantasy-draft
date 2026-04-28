@@ -10,6 +10,7 @@ All SQL uses PostgreSQL placeholder syntax ($1, $2, ...) and dialect.
 import logging
 import time
 import asyncpg
+from datetime import datetime
 from src.backend.config import DATABASE_URL
 
 _pool: asyncpg.Pool | None = None
@@ -377,18 +378,27 @@ async def init_db():
         else:
             print("[DB] PostgreSQL schema already exists, skipping")
 
-        # Backfill: budgets unified at 100M (was 500M before market-budget redesign)
+        # One-time migration: budgets unified at 100M (was 500M before market-budget redesign).
+        # Gated by a sync_state flag so we don't clobber budgets that grew past 100M
+        # from market sales on subsequent deploys.
         try:
-            updated_leagues = await conn.fetchval(
-                "WITH u AS (UPDATE leagues SET initial_budget=100000000 WHERE initial_budget=500000000 RETURNING 1) SELECT count(*) FROM u"
+            already_done = await conn.fetchval(
+                "SELECT value FROM sync_state WHERE key='migration_budget_500m_to_100m'"
             )
-            updated_teams = await conn.fetchval(
-                "WITH u AS (UPDATE fantasy_teams SET budget=100000000 WHERE budget=500000000 RETURNING 1) SELECT count(*) FROM u"
-            )
-            if updated_leagues or updated_teams:
-                print(f"[DB] Migrated budgets 500M→100M: {updated_leagues} leagues, {updated_teams} teams")
+            if not already_done:
+                updated_leagues = await conn.fetchval(
+                    "WITH u AS (UPDATE leagues SET initial_budget=100000000 WHERE initial_budget=500000000 RETURNING 1) SELECT count(*) FROM u"
+                )
+                updated_teams = await conn.fetchval(
+                    "WITH u AS (UPDATE fantasy_teams SET budget=100000000 WHERE budget=500000000 RETURNING 1) SELECT count(*) FROM u"
+                )
+                await conn.execute(
+                    "INSERT INTO sync_state (key, value) VALUES ('migration_budget_500m_to_100m', $1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+                    datetime.utcnow().isoformat(),
+                )
+                print(f"[DB] One-time budget migration 500M→100M: {updated_leagues} leagues, {updated_teams} teams")
         except Exception as e:
-            print(f"[DB] Budget backfill skipped: {e}")
+            print(f"[DB] Budget migration skipped: {e}")
 
 
 async def close_pool():
