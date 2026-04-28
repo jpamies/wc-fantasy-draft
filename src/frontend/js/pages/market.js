@@ -219,13 +219,15 @@ Router.register('#/market/:windowId', async (container, params) => {
             `;
         }
 
-        // Reposition draft phase
+        // Reposition draft phase — link to the unified draft page
         if (win.status === 'reposition_draft') {
             content += `
-                <div class="card mb-2">
-                    <div class="card-header">📋 Draft de Reposición</div>
-                    <div id="reposition-state"></div>
-                    <div id="available-reposition-players" style="max-height:400px;overflow-y:auto"></div>
+                <div class="card mb-2 text-center">
+                    <div class="card-header">📋 Draft de Reposición en curso</div>
+                    <p style="color:var(--text-secondary);margin:.5rem 0 1rem">
+                        El draft de repesca se gestiona desde la página de Draft.
+                    </p>
+                    <a href="#/draft" class="btn btn-primary">🎯 Ir al Draft de Repesca</a>
                 </div>
             `;
         }
@@ -256,11 +258,6 @@ Router.register('#/market/:windowId', async (container, params) => {
         // Load available players
         if (win.status === 'market_open') {
             await loadAvailablePlayers(leagueId, teamId, windowId);
-        }
-
-        // Load reposition draft state
-        if (win.status === 'reposition_draft') {
-            await loadRepositionDraft(leagueId, teamId, windowId);
         }
 
     } catch (err) {
@@ -617,89 +614,4 @@ window.buyPlayer = async function(leagueId, teamId, windowId, btn) {
     }
 };
 
-async function loadRepositionDraft(leagueId, teamId, windowId) {
-    try {
-        const state = await API.get(`/leagues/${leagueId}/market/${windowId}/reposition-draft-state`);
-        const stateContainer = document.getElementById('reposition-state');
-
-        const myEntry = state.leaderboard.find(l => l.team_id === teamId);
-
-        stateContainer.innerHTML = `
-            <div class="grid grid-3 mb-2">
-                <div class="stat-card">
-                    <div class="stat-label">Tu Turno</div>
-                    <div class="stat-value">${state.current_turn_team_id === teamId ? '✅ TÚ' : '⏳'}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Tu Plantilla</div>
-                    <div class="stat-value">${myEntry?.players_count || 0}/23</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Disponibles</div>
-                    <div class="stat-value">${state.remaining_available_players}</div>
-                </div>
-            </div>
-
-            <div style="margin-bottom:1rem">
-                <h4>Orden del Draft</h4>
-                <table style="width:100%;font-size:.85rem">
-                    <thead><tr><th>Equipo</th><th>Presupuesto</th><th>Jugadores</th></tr></thead>
-                    <tbody>
-                        ${state.draft_order.map(e => `
-                            <tr style="${e.team_id === state.current_turn_team_id ? 'background:var(--bg-secondary)' : ''}">
-                                <td><strong>${e.team_name}</strong>${e.team_id === teamId ? ' (TÚ)' : ''}</td>
-                                <td>${formatMoney(e.remaining_budget)}</td>
-                                <td>${e.players_count} (${e.gk_count}GK ${e.def_count}DEF ${e.mid_count}MID ${e.fwd_count}FWD)</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-
-        // Load available players for reposition
-        const players = await API.get(`/leagues/${leagueId}/market/${windowId}/reposition-available-players`);
-        const container = document.getElementById('available-reposition-players');
-
-        const isMyTurn = state.current_turn_team_id === teamId;
-
-        container.innerHTML = `
-            <h4>Jugadores Disponibles</h4>
-            ${!isMyTurn ? '<p style="color:var(--text-muted);font-size:.85rem">⏳ Esperando turno…</p>' : ''}
-            <div class="grid grid-2">
-                ${players.slice(0, 50).map(p => `
-                    <div class="player-card">
-                        <img src="${p.photo || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'" style="height:50px;width:auto">
-                        <div>
-                            <strong>${p.name}</strong>
-                            <div style="font-size:.75rem;color:var(--text-secondary)">${p.country_code} · ${p.position}</div>
-                        </div>
-                        <button class="btn btn-sm btn-primary" ${isMyTurn ? '' : 'disabled'}
-                            onclick="window.makeRepositionPick('${leagueId}', '${teamId}', '${windowId}', '${p.player_id}')">
-                            Elegir
-                        </button>
-                    </div>
-                `).join('')}
-            </div>
-            ${players.length > 50 ? `<p style="color:var(--text-muted);font-size:.85rem;margin-top:.5rem">Mostrando 50 de ${players.length}…</p>` : ''}
-            ${isMyTurn ? `
-                <button class="btn btn-outline mt-1" onclick="window.makeRepositionPick('${leagueId}', '${teamId}', '${windowId}', null)">
-                    Pasar Turno
-                </button>
-            ` : ''}
-        `;
-    } catch (err) {
-        console.error(err);
-    }
-}
-
-window.makeRepositionPick = async function(leagueId, teamId, windowId, playerId) {
-    try {
-        await API.post(`/teams/${teamId}/market/${windowId}/reposition-draft-pick`, { player_id: playerId });
-        showToast(playerId ? '¡Jugador elegido!' : 'Turno pasado', 'success');
-        Router.handleRoute();
-    } catch (err) {
-        showToast(err.message, 'error');
-    }
-};
 

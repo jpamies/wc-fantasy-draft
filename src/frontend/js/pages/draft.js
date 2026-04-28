@@ -5,6 +5,14 @@ Router.register('#/draft', async (container) => {
     try {
         state = await API.get(`/leagues/${leagueId}/draft`);
     } catch {
+        // No regular draft → check for an active reposition draft window.
+        try {
+            const windows = await API.get(`/leagues/${leagueId}/market-windows`);
+            const repoWin = (windows || []).find(w => w.status === 'reposition_draft');
+            if (repoWin) {
+                return await renderRepositionDraft(container, leagueId, repoWin.id);
+            }
+        } catch {}
         container.innerHTML = '<div class="card text-center mt-2"><p>No hay draft activo en esta liga.</p></div>';
         return;
     }
@@ -491,3 +499,241 @@ Router.register('#/draft', async (container) => {
         window.removeEventListener('hashchange', cleanup);
     }, { once: true });
 });
+
+
+// ===================== REPOSITION DRAFT MODE =====================
+// Renders the reposition (repesca) draft using the same look & feel as the
+// regular draft page. Uses /market/{wid}/reposition-* endpoints. Polls every
+// 3s — there's no WebSocket for reposition.
+async function renderRepositionDraft(container, leagueId, windowId) {
+    const teamId = API.getTeamId();
+    let state, players = [];
+    let filterPos = '';
+    let filterCountry = '';
+    let searchTerm = '';
+    let countries = [];
+    let alive = true;
+    let pollTimer = null;
+    let lastPickCount = 0;
+
+    try {
+        countries = await API.get('/countries');
+        countries.sort((a, b) => a.name.localeCompare(b.name));
+    } catch { countries = []; }
+
+    async function loadState() {
+        state = await API.get(`/leagues/${leagueId}/market/${windowId}/reposition-draft-state`);
+    }
+    async function loadPlayers() {
+        const all = await API.get(`/leagues/${leagueId}/market/${windowId}/reposition-available-players`);
+        players = (all || []).filter(p => {
+            if (filterPos && p.position !== filterPos) return false;
+            if (filterCountry && p.country_code !== filterCountry) return false;
+            if (searchTerm && !p.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+            return true;
+        });
+    }
+
+    function render() {
+        const myTurn = state.current_turn_team_id === teamId;
+        const isDone = state.status === 'completed';
+        const myPicksCount = (state.my_picks || []).filter(p => p.player_id).length;
+
+        container.innerHTML = `
+            <div class="flex-between mb-2">
+                <h2>📋 Draft de Repesca ${isDone ? '(Completado)' : ''}</h2>
+                <div class="flex" style="gap:.5rem;align-items:center">
+                    <span class="status-dot status-pending"></span>
+                    <span style="font-size:.75rem;color:var(--text-muted)">Polling</span>
+                </div>
+            </div>
+
+            ${!isDone ? `
+            <div class="draft-turn ${myTurn ? 'my-turn' : ''}">
+                <div style="font-size:.9rem;color:var(--text-secondary)">${myTurn ? '🔔 ¡ES TU TURNO!' : 'Esperando turno…'}</div>
+                <div style="font-size:1.3rem;font-weight:700">
+                    ${(state.draft_order.find(o => o.team_id === state.current_turn_team_id) || {}).team_name || '...'}
+                </div>
+                <div style="font-size:.85rem;color:var(--text-muted)">Pick ${state.current_turn_number}</div>
+                ${myTurn ? `<div class="flex mt-1" style="justify-content:center;gap:.5rem">
+                    <button class="btn btn-outline btn-sm" id="btn-repo-pass">⏭ Pasar turno</button>
+                </div>` : ''}
+            </div>` : '<div class="card text-center mb-2"><p style="color:var(--accent-gold);font-size:1.2rem">🏆 Draft de repesca completado</p></div>'}
+
+            <div class="draft-grid">
+                <div class="draft-col-main">
+                    <div class="card">
+                        <div class="flex-between mb-1">
+                            <div class="card-header" style="margin:0">Jugadores disponibles (${players.length})</div>
+                            <input type="text" id="repo-search" placeholder="Buscar..." style="width:160px" value="${searchTerm}">
+                        </div>
+                        <div class="filter-bar">
+                            ${['', 'GK', 'DEF', 'MID', 'FWD'].map(p =>
+                                `<button class="filter-btn ${filterPos === p ? 'active' : ''}" data-pos="${p}">${p || 'Todos'}</button>`
+                            ).join('')}
+                            <div class="draft-country-wrap" id="repo-country-wrap">
+                                <button class="draft-country-btn" id="repo-country-btn">
+                                    ${filterCountry ? `<img src="${(countries.find(c=>c.code===filterCountry)||{}).flag||''}" class="draft-flag"> ${(countries.find(c=>c.code===filterCountry)||{}).name||''}` : 'Todos los paises'}
+                                </button>
+                                <div class="draft-country-dropdown" id="repo-country-dropdown">
+                                    <div class="draft-country-option ${!filterCountry ? 'active' : ''}" data-code="">Todos los paises</div>
+                                    ${countries.map(c => `
+                                        <div class="draft-country-option ${filterCountry === c.code ? 'active' : ''}" data-code="${c.code}">
+                                            <img src="${c.flag}" class="draft-flag"> ${c.name}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        <div id="repo-player-list" style="max-height:500px;overflow-y:auto">
+                            ${renderRepoPlayerList(players, myTurn && !isDone)}
+                        </div>
+                    </div>
+                </div>
+                <div class="draft-col-side">
+                    <div class="card mb-2">
+                        <div class="card-header">Orden del draft</div>
+                        <div style="max-height:280px;overflow-y:auto">
+                            ${(state.draft_order || []).map(o => `
+                                <div class="pick-log-entry ${o.team_id === state.current_turn_team_id ? 'pick-new' : ''}">
+                                    <span style="color:var(--text-muted)">P${o.pick_number}</span>
+                                    <strong>${o.team_name}</strong>${o.team_id === teamId ? ' (TÚ)' : ''}
+                                    <span style="color:var(--text-muted);font-size:.75rem;margin-left:auto">
+                                        ${o.players_count}/23
+                                    </span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">Mis picks (${myPicksCount})</div>
+                        ${(state.my_picks || []).filter(p => p.player_id).map(p => `
+                            <div style="font-size:.8rem;padding:.15rem 0;display:flex;align-items:center;gap:.4rem">
+                                ${posBadge(p.position || 'MID')} <span>${p.name || p.player_id}</span>
+                            </div>
+                        `).join('')}
+                        ${myPicksCount === 0 ? '<p style="color:var(--text-muted);font-size:.85rem">Sin picks todavía</p>' : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        bindRepoEvents();
+    }
+
+    function renderRepoPlayerList(list, canPick) {
+        if (!list.length) {
+            return '<div class="text-center" style="color:var(--text-muted);padding:2rem">Sin jugadores disponibles</div>';
+        }
+        return list.map(p => `
+            <div class="player-card" data-pid="${p.id}">
+                <img src="${p.photo}" alt="" referrerpolicy="no-referrer" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><rect fill=%22%23374151%22 width=%2240%22 height=%2240%22/><text x=%2220%22 y=%2225%22 text-anchor=%22middle%22 fill=%22%239ca3af%22 font-size=%2214%22>⚽</text></svg>'">
+                <div class="player-info">
+                    <div class="player-name"><a href="#/player/${p.id}" style="color:inherit;text-decoration:none">${p.name}</a></div>
+                    <div class="player-meta">${p.country_code}</div>
+                </div>
+                ${posBadge(p.position)}
+                <div class="player-value">${formatMoney(p.market_value)}</div>
+                ${canPick ? `<button class="btn btn-primary btn-sm repo-pick-btn" data-pid="${p.id}">Pick</button>` : ''}
+            </div>
+        `).join('');
+    }
+
+    function bindRepoEvents() {
+        container.querySelectorAll('.repo-pick-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                btn.disabled = true; btn.textContent = '...';
+                try {
+                    await API.post(`/teams/${teamId}/market/${windowId}/reposition-draft-pick`, { player_id: btn.dataset.pid });
+                    showToast('¡Pick realizado!', 'success');
+                    await refresh();
+                } catch (err) { showToast(err.message, 'error'); btn.disabled = false; btn.textContent = 'Pick'; }
+            });
+        });
+
+        document.getElementById('btn-repo-pass')?.addEventListener('click', async () => {
+            if (!confirm('¿Pasar tu turno? No podrás pickear este pick.')) return;
+            try {
+                await API.post(`/teams/${teamId}/market/${windowId}/reposition-draft-pick`, { player_id: null });
+                showToast('Turno pasado', 'info');
+                await refresh();
+            } catch (err) { showToast(err.message, 'error'); }
+        });
+
+        container.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                filterPos = btn.dataset.pos;
+                await loadPlayers();
+                render();
+            });
+        });
+
+        document.getElementById('repo-search')?.addEventListener('input', async (e) => {
+            searchTerm = e.target.value;
+            await loadPlayers();
+            const list = document.getElementById('repo-player-list');
+            if (list) {
+                const myTurn = state.current_turn_team_id === teamId;
+                const isDone = state.status === 'completed';
+                list.innerHTML = renderRepoPlayerList(players, myTurn && !isDone);
+                container.querySelectorAll('.repo-pick-btn').forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        btn.disabled = true; btn.textContent = '...';
+                        try {
+                            await API.post(`/teams/${teamId}/market/${windowId}/reposition-draft-pick`, { player_id: btn.dataset.pid });
+                            showToast('¡Pick realizado!', 'success');
+                            await refresh();
+                        } catch (err) { showToast(err.message, 'error'); btn.disabled = false; btn.textContent = 'Pick'; }
+                    });
+                });
+            }
+        });
+
+        document.getElementById('repo-country-btn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('repo-country-dropdown')?.classList.toggle('open');
+        });
+        document.querySelectorAll('#repo-country-dropdown .draft-country-option').forEach(opt => {
+            opt.addEventListener('click', async () => {
+                filterCountry = opt.dataset.code;
+                document.getElementById('repo-country-dropdown')?.classList.remove('open');
+                await loadPlayers();
+                render();
+            });
+        });
+        document.addEventListener('click', () => {
+            document.getElementById('repo-country-dropdown')?.classList.remove('open');
+        }, { once: true });
+    }
+
+    async function refresh() {
+        if (!alive) return;
+        try {
+            await loadState();
+            await loadPlayers();
+            const newPickCount = (state.draft_order || []).reduce((sum, o) => sum + (o.players_count || 0), 0);
+            if (newPickCount !== lastPickCount) {
+                lastPickCount = newPickCount;
+                render();
+                if (state.current_turn_team_id === teamId && state.status !== 'completed') {
+                    showToast('🔔 ¡Es tu turno!', 'success');
+                }
+            } else {
+                render();
+            }
+        } catch (err) { console.error('Reposition refresh error:', err); }
+    }
+
+    await loadState();
+    await loadPlayers();
+    lastPickCount = (state.draft_order || []).reduce((sum, o) => sum + (o.players_count || 0), 0);
+    render();
+
+    pollTimer = setInterval(refresh, 3000);
+
+    window.addEventListener('hashchange', function cleanup() {
+        alive = false;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        window.removeEventListener('hashchange', cleanup);
+    }, { once: true });
+}
