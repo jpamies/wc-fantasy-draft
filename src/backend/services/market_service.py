@@ -193,13 +193,63 @@ class MarketService:
 
     @staticmethod
     async def start_clause_phase(window_id: int) -> Dict[str, Any]:
-        """Transition market window to clause_window phase."""
+        """Transition market window to clause_window phase.
+
+        Pre-populates each team's clauses from the previous window so users
+        see their old values as defaults and only need to adjust changes.
+        """
         db = await get_db()
         try:
+            window = await MarketService.get_market_window(window_id)
+            league_id = window["league_id"]
+
             await db.execute(
                 "UPDATE market_windows SET status='clause_window', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
+
+            # Copy clauses from the most recent previous window in this league
+            prev_window = await db.execute_fetchall(
+                """SELECT id FROM market_windows
+                   WHERE league_id=$1 AND id < $2
+                   ORDER BY id DESC LIMIT 1""",
+                (league_id, window_id),
+            )
+            if prev_window:
+                prev_id = prev_window[0]["id"]
+                # Only copy for teams that don't already have clauses in this window
+                teams_with_clauses = await db.execute_fetchall(
+                    "SELECT DISTINCT team_id FROM player_clauses WHERE market_window_id=$1",
+                    (window_id,),
+                )
+                teams_already = {r["team_id"] for r in teams_with_clauses}
+
+                prev_clauses = await db.execute_fetchall(
+                    """SELECT pc.team_id, pc.player_id, pc.clause_amount, pc.is_blocked
+                       FROM player_clauses pc
+                       WHERE pc.market_window_id = $1""",
+                    (prev_id,),
+                )
+
+                now = datetime.now().isoformat()
+                for pc in prev_clauses:
+                    if pc["team_id"] in teams_already:
+                        continue
+                    # Only carry over if the player is still on the same team
+                    still_owned = await db.execute_fetchall(
+                        "SELECT 1 FROM team_players WHERE team_id=$1 AND player_id=$2",
+                        (pc["team_id"], pc["player_id"]),
+                    )
+                    if still_owned:
+                        await db.execute(
+                            """INSERT INTO player_clauses
+                               (market_window_id, team_id, player_id, clause_amount, is_blocked, created_at, updated_at)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7)
+                               ON CONFLICT DO NOTHING""",
+                            (window_id, pc["team_id"], pc["player_id"],
+                             pc["clause_amount"], pc["is_blocked"], now, now),
+                        )
+
             await db.commit()
             result = await MarketService.get_market_window(window_id)
         except Exception as e:
@@ -292,6 +342,16 @@ class MarketService:
                 )
 
             # Initialize budgets for all teams in league
+            # Carry over remaining_budget from the PREVIOUS market window
+            # (if any). Only the first window gives the full initial_budget.
+            prev_window = await db.execute_fetchall(
+                """SELECT id FROM market_windows
+                   WHERE league_id=$1 AND id < $2
+                   ORDER BY id DESC LIMIT 1""",
+                (league_id, window_id),
+            )
+            prev_window_id = prev_window[0]["id"] if prev_window else None
+
             teams = await db.execute_fetchall(
                 "SELECT id FROM fantasy_teams WHERE league_id=$1", (league_id,)
             )
@@ -304,11 +364,22 @@ class MarketService:
                     (window_id, team_id),
                 )
                 if not existing:
+                    # Try to carry over from previous window
+                    carried = None
+                    if prev_window_id:
+                        prev_budget = await db.execute_fetchall(
+                            "SELECT remaining_budget FROM market_budgets WHERE market_window_id=$1 AND team_id=$2",
+                            (prev_window_id, team_id),
+                        )
+                        if prev_budget:
+                            carried = prev_budget[0]["remaining_budget"]
+
+                    budget_amount = carried if carried is not None else window["initial_budget"]
                     await db.execute(
                         """INSERT INTO market_budgets 
                            (market_window_id, team_id, initial_budget, remaining_budget)
                            VALUES ($1, $2, $3, $4)""",
-                        (window_id, team_id, window["initial_budget"], window["initial_budget"]),
+                        (window_id, team_id, budget_amount, budget_amount),
                     )
 
             await db.commit()
