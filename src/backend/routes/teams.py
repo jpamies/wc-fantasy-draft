@@ -34,11 +34,14 @@ FORMATIONS = {
 
 @router.get("/teams/{team_id}", response_model=TeamOut)
 async def get_team(team_id: str):
-    # Backfill any missing players from simulator
+    # Backfill any missing players from simulator (best-effort; never fail the GET).
     from src.backend.config import settings
     if settings.SIMULATOR_API_URL:
-        from src.backend.services.simulator_client import ensure_team_players_in_db
-        await ensure_team_players_in_db(team_id)
+        try:
+            from src.backend.services.simulator_client import ensure_team_players_in_db
+            await ensure_team_players_in_db(team_id)
+        except Exception as e:
+            logger.warning("ensure_team_players_in_db failed for %s: %s", team_id, e)
 
     db = await get_db()
     try:
@@ -61,29 +64,53 @@ async def get_team(team_id: str):
                WHERE tp.team_id=$1 ORDER BY tp.is_starter DESC, tp.bench_order ASC""",
             (team_id,),
         )
-        # Compute alive set once for is_alive flag.
-        from src.backend.services.market_service import get_alive_country_codes
-        alive_codes = await get_alive_country_codes()
-        player_list = [
-            TeamPlayerOut(
-                player_id=p["player_id"], name=p["name"], country_code=p["country_code"],
-                country_flag=p["country_flag"] or "",
-                position=p["position"], detailed_position=p["detailed_position"],
-                club=p["club"], photo=p["photo"], market_value=p["market_value"],
-                clause_value=p["clause_value"], is_starter=bool(p["is_starter"]),
-                position_slot=p["position_slot"] or "", is_captain=bool(p["is_captain"]),
-                is_vice_captain=bool(p["is_vice_captain"]),
-                bench_order=p["bench_order"], acquired_via=p["acquired_via"],
-                total_points=p["total_points"],
-                is_alive=(alive_codes is None) or (p["country_code"] in alive_codes),
-            ).model_dump()
-            for p in players
-        ]
+        # Compute alive set once for is_alive flag (best-effort).
+        try:
+            from src.backend.services.market_service import get_alive_country_codes
+            alive_codes = await get_alive_country_codes()
+        except Exception as e:
+            logger.warning("get_alive_country_codes failed: %s", e)
+            alive_codes = None
+
+        player_list = []
+        for p in players:
+            try:
+                player_list.append(TeamPlayerOut(
+                    player_id=p["player_id"], name=p["name"] or "",
+                    country_code=p["country_code"] or "",
+                    country_flag=p["country_flag"] or "",
+                    position=p["position"] or "MID",
+                    detailed_position=p["detailed_position"] or "",
+                    club=p["club"] or "", photo=p["photo"] or "",
+                    market_value=int(p["market_value"] or 0),
+                    clause_value=int(p["clause_value"] or 0),
+                    is_starter=bool(p["is_starter"]),
+                    position_slot=p["position_slot"] or "",
+                    is_captain=bool(p["is_captain"]),
+                    is_vice_captain=bool(p["is_vice_captain"]),
+                    bench_order=int(p["bench_order"] or 0),
+                    acquired_via=p["acquired_via"] or "draft",
+                    total_points=int(p["total_points"] or 0),
+                    is_alive=(alive_codes is None) or (p["country_code"] in alive_codes),
+                ).model_dump())
+            except Exception as e:
+                logger.error(
+                    "Failed to build TeamPlayerOut for team=%s player=%s: %s\nrow=%r\n%s",
+                    team_id, p.get("player_id"), e, dict(p), traceback.format_exc(),
+                )
+                # Skip this row rather than failing the whole team page.
+                continue
+
         return TeamOut(
             id=team["id"], league_id=team["league_id"],
             owner_nick=team["owner_nick"], team_name=team["team_name"],
             budget=team["budget"], formation=team["formation"], players=player_list,
         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_team failed for %s: %s\n%s", team_id, e, traceback.format_exc())
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
     finally:
         await db.close()
 
