@@ -181,6 +181,11 @@ async function loadMarketsList(leagueId) {
                                         ⏪ Rebobinar a Cláusulas
                                     </button>
                                 ` : ''}
+                                ${w.status === 'clause_window' ? `
+                                    <button class="btn btn-sm btn-secondary btn-bot-clauses" data-wid="${w.id}">
+                                        🤖 Cláusulas bots
+                                    </button>
+                                ` : ''}
                                 <a href="#/market/${w.id}" class="btn btn-sm btn-outline">Ver</a>
                             </td>
                         </tr>
@@ -218,6 +223,18 @@ async function loadMarketsList(leagueId) {
                     const r = await API.post(`/leagues/${leagueId}/admin/market-windows/${btn.dataset.wid}/force-advance`, {});
                     showToast(`Avanzado: ${r.previous_status} → ${r.status}`, 'success');
                     await loadMarketsList(leagueId);
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            });
+        });
+
+        container.querySelectorAll('.btn-bot-clauses').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('¿Generar cláusulas automáticamente para los equipos bot?')) return;
+                try {
+                    const r = await API.post(`/leagues/${leagueId}/admin/market-windows/${btn.dataset.wid}/run-bot-clauses`, {});
+                    showToast(`Cláusulas generadas para ${r.bots_processed} bots`, 'success');
                 } catch (err) {
                     showToast(err.message, 'error');
                 }

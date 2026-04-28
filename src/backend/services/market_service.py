@@ -166,12 +166,21 @@ class MarketService:
                 (datetime.now().isoformat(), window_id),
             )
             await db.commit()
-            return await MarketService.get_market_window(window_id)
+            result = await MarketService.get_market_window(window_id)
         except Exception as e:
             logger.error(f"Error starting clause phase: {e}")
             raise
         finally:
             await db.close()
+
+        # Auto-set clauses for bot teams (fire-and-forget logged on errors).
+        try:
+            from src.backend.services.bot_service import set_bot_clauses_for_window
+            await set_bot_clauses_for_window(window_id)
+        except Exception as e:
+            logger.error(f"Bot clauses auto-set failed for window {window_id}: {e}")
+
+        return result
 
     @staticmethod
     async def start_market_phase(window_id: int) -> Dict[str, Any]:

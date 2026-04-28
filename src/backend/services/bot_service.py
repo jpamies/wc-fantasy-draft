@@ -274,3 +274,195 @@ async def remove_bots(league_id: str) -> int:
         return len(bot_ids)
     finally:
         await db.close()
+
+
+# Preset clause amounts (must mirror frontend CLAUSE_PRESETS).
+_CLAUSE_PRESETS = [0, 1_000_000, 5_000_000, 15_000_000, 25_000_000, 50_000_000, 80_000_000]
+
+
+def _snap_to_preset(value: int) -> int:
+    """Return the largest preset <= value (min 0)."""
+    chosen = 0
+    for p in _CLAUSE_PRESETS:
+        if p <= value:
+            chosen = p
+        else:
+            break
+    return chosen
+
+
+async def set_bot_clauses_for_window(window_id: int) -> int:
+    """Auto-set clauses for every bot team in the league of this market window.
+
+    Strategy per bot:
+      - Load roster (player_id, position, market_value, country_code,
+        total_points = SUM(match_scores.points), alive = country has any
+        non-finished match scheduled).
+      - Eliminated-country players → SELL (clause=0, not blocked) → released
+        when market opens.
+      - Top 2 alive players by priority → blocked (clause=0, is_blocked=True).
+        Priority = total_points * 1.5 + market_value/1e7.
+      - Remaining alive players → tiered clauses by rank (50M / 25M / 15M / 5M
+        / 1M), trimmed to fit within ``protect_budget``.
+
+    Returns count of bots that received clauses.
+    """
+    from src.backend.database import get_db
+    # Late import to avoid circular dependency
+    from src.backend.services.market_service import MarketService
+
+    db = await get_db()
+    try:
+        window = await db.execute_fetchall(
+            "SELECT id, league_id, protect_budget FROM market_windows WHERE id=$1",
+            (window_id,),
+        )
+        if not window:
+            return 0
+        window = dict(window[0])
+        league_id = window["league_id"]
+        protect_budget = window["protect_budget"] or 300_000_000
+
+        bots = await db.execute_fetchall(
+            "SELECT id FROM fantasy_teams WHERE league_id=$1 AND owner_nick LIKE 'bot_%'",
+            (league_id,),
+        )
+        bot_ids = [b["id"] for b in bots]
+    finally:
+        await db.close()
+
+    if not bot_ids:
+        return 0
+
+    processed = 0
+    for team_id in bot_ids:
+        try:
+            await _set_clauses_for_one_bot(team_id, window_id, protect_budget)
+            processed += 1
+        except Exception as e:
+            logger.error(f"Bot clause setup failed for team {team_id}: {e}")
+
+    logger.info(
+        f"Bot clauses set for {processed}/{len(bot_ids)} bots in window {window_id}"
+    )
+    return processed
+
+
+async def _set_clauses_for_one_bot(team_id: str, window_id: int, protect_budget: int):
+    """Compute and persist clauses for a single bot team."""
+    from src.backend.database import get_db
+    from src.backend.services.market_service import MarketService
+
+    db = await get_db()
+    try:
+        # Roster + total points + alive flag.
+        # alive = exists at least one non-finished match for the player's country.
+        roster = await db.execute_fetchall(
+            """
+            SELECT tp.player_id,
+                   p.position,
+                   p.country_code,
+                   COALESCE(p.market_value, 0) AS market_value,
+                   COALESCE((SELECT SUM(ms.points) FROM match_scores ms
+                             WHERE ms.player_id = tp.player_id), 0) AS total_points,
+                   EXISTS (
+                       SELECT 1 FROM matches m
+                       WHERE (m.home_country = p.country_code OR m.away_country = p.country_code)
+                         AND m.status <> 'finished'
+                   ) AS alive
+            FROM team_players tp
+            JOIN players p ON tp.player_id = p.id
+            WHERE tp.team_id = $1
+            """,
+            (team_id,),
+        )
+    finally:
+        await db.close()
+
+    if not roster:
+        return
+
+    players = [dict(r) for r in roster]
+    for p in players:
+        # Priority: heavy weight on accumulated points, market_value as tiebreak.
+        # Eliminated players are pushed to bottom (negative priority).
+        if p["alive"]:
+            p["priority"] = float(p["total_points"]) * 1.5 + (p["market_value"] / 1e7)
+        else:
+            p["priority"] = -1.0  # any alive player ranks above any eliminated one
+
+    players.sort(key=lambda x: x["priority"], reverse=True)
+
+    # Build clause list
+    clauses = []
+    alive_players = [p for p in players if p["alive"]]
+    dead_players = [p for p in players if not p["alive"]]
+
+    # Top 2 alive → blocked
+    blocked_ids = {p["player_id"] for p in alive_players[:2]}
+
+    # Tiered targets for remaining alive players (rank-based)
+    def target_for_rank(idx: int) -> int:
+        if idx < 2:
+            return 50_000_000
+        if idx < 5:
+            return 25_000_000
+        if idx < 8:
+            return 15_000_000
+        if idx < 12:
+            return 5_000_000
+        return 1_000_000
+
+    # Compute targets for remaining alive
+    remaining_alive = [p for p in alive_players if p["player_id"] not in blocked_ids]
+    targets = []
+    for idx, p in enumerate(remaining_alive):
+        targets.append([p, target_for_rank(idx)])
+
+    # Trim to fit protect_budget — drop preset tier on top players first.
+    def total_targets():
+        return sum(t for _, t in targets)
+
+    while total_targets() > protect_budget and targets:
+        # Find the player with the highest target and demote them.
+        max_idx = max(range(len(targets)), key=lambda i: targets[i][1])
+        cur = targets[max_idx][1]
+        # Demote to next lower preset
+        try:
+            cur_pos = _CLAUSE_PRESETS.index(cur)
+        except ValueError:
+            cur_pos = 0
+        if cur_pos == 0:
+            break  # already at 0, can't reduce further
+        targets[max_idx][1] = _CLAUSE_PRESETS[cur_pos - 1]
+
+    # Build final clauses list for all roster players.
+    target_map = {p["player_id"]: amount for p, amount in targets}
+    for p in players:
+        pid = p["player_id"]
+        if pid in blocked_ids:
+            clauses.append({
+                "player_id": pid,
+                "clause_amount": 0,
+                "is_blocked": True,
+            })
+        elif not p["alive"]:
+            # Eliminated → SELL (will be released when market opens)
+            clauses.append({
+                "player_id": pid,
+                "clause_amount": 0,
+                "is_blocked": False,
+            })
+        else:
+            clauses.append({
+                "player_id": pid,
+                "clause_amount": target_map.get(pid, 1_000_000),
+                "is_blocked": False,
+            })
+
+    await MarketService.set_player_clauses(window_id, team_id, clauses)
+    logger.info(
+        f"Bot {team_id} clauses set: {len(clauses)} players, "
+        f"{len(blocked_ids)} blocked, {len(dead_players)} eliminated→SELL, "
+        f"total={sum(c['clause_amount'] for c in clauses if not c['is_blocked'])}"
+    )

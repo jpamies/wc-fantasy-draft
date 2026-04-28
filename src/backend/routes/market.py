@@ -230,6 +230,30 @@ async def rewind_to_clause(
     return {"ok": True, "window_id": window_id, "status": "clause_window"}
 
 
+@router.post("/leagues/{league_id}/admin/market-windows/{window_id}/run-bot-clauses")
+async def run_bot_clauses(
+    league_id: str,
+    window_id: int,
+    current_team: dict = Depends(get_current_team),
+):
+    """Manually trigger bot clause-setting for an existing market window.
+
+    Useful when a window was already in clause_window before bot logic
+    was added, or to re-run the heuristic.
+    """
+    if current_team.get("league_id") != league_id or not current_team.get("is_commissioner"):
+        raise HTTPException(403, "Commissioner only")
+
+    from src.backend.services.bot_service import set_bot_clauses_for_window
+    try:
+        n = await set_bot_clauses_for_window(window_id)
+        return {"ok": True, "bots_processed": n}
+    except Exception as e:
+        logger.error(f"run_bot_clauses failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+
 @router.post("/leagues/{league_id}/admin/market-windows/{window_id}/force-advance")
 async def force_advance_market_phase(
     league_id: str,
@@ -289,6 +313,18 @@ async def force_advance_market_phase(
             )
             await db.commit()
             new_status = "clause_window"
+            # Trigger bot clauses (released-from-DB-pool path)
+            try:
+                from src.backend.services.bot_service import set_bot_clauses_for_window
+                await db.close()
+                await set_bot_clauses_for_window(window_id)
+                db = await get_db()
+            except Exception as e:
+                logger.error(f"Bot clauses auto-set failed for window {window_id}: {e}")
+                try:
+                    db = await get_db()
+                except Exception:
+                    pass
         elif status == "clause_window":
             await db.commit()
             await db.close()
