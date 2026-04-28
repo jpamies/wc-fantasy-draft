@@ -402,6 +402,27 @@ class MarketService:
             if seller_budget and seller_budget["sells_count"] >= window["max_sells"]:
                 return {"success": False, "reason": "Seller reached maximum sells limit"}
 
+            # Check buyer's squad hasn't reached the size/position limits.
+            # Total max 23, position max: GK=3, DEF=8, MID=8, FWD=8 (mirrors draft engine).
+            POSITION_MAX = {"GK": 3, "DEF": 8, "MID": 8, "FWD": 8}
+            counts_rows = await db.execute_fetchall(
+                """SELECT p.position, COUNT(*) as cnt
+                   FROM team_players tp JOIN players p ON tp.player_id = p.id
+                   WHERE tp.team_id = $1
+                   GROUP BY p.position""",
+                (buyer_team_id,),
+            )
+            counts = {r["position"]: r["cnt"] for r in counts_rows}
+            total = sum(counts.values())
+            if total >= 23:
+                return {"success": False, "reason": "Squad full (23 players)"}
+            player_pos_row = await db.execute_fetchall(
+                "SELECT position FROM players WHERE id=$1", (player_id,)
+            )
+            player_pos = player_pos_row[0]["position"] if player_pos_row else None
+            if player_pos and counts.get(player_pos, 0) >= POSITION_MAX.get(player_pos, 99):
+                return {"success": False, "reason": f"Already at position cap ({POSITION_MAX[player_pos]} {player_pos})"}
+
             # Use transaction to ensure atomicity
             try:
                 # Move player

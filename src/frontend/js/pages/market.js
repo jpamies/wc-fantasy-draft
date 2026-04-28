@@ -119,6 +119,31 @@ Router.register('#/market/:windowId', async (container, params) => {
         const budget = await API.get(`/teams/${teamId}/market/${windowId}/budget`);
         const clauses = await API.get(`/teams/${teamId}/market/${windowId}/clauses`);
         const transactions = await API.get(`/teams/${teamId}/market/${windowId}/transaction-history`);
+        const team = await API.get(`/teams/${teamId}`);
+
+        // Squad composition limits (mirror backend draft rules)
+        const SQUAD_LIMITS = { GK: { min: 2, max: 3 }, DEF: { min: 5, max: 8 }, MID: { min: 5, max: 8 }, FWD: { min: 5, max: 8 } };
+        const SQUAD_MAX = 23;
+        const counts = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+        (team.players || []).forEach(p => { if (counts[p.position] !== undefined) counts[p.position] += 1; });
+        const total = counts.GK + counts.DEF + counts.MID + counts.FWD;
+        // Expose to renderAvailablePlayers + buyPlayer for client-side validation
+        window._marketSquadCounts = counts;
+        window._marketSquadTotal = total;
+        window._marketSquadLimits = SQUAD_LIMITS;
+        window._marketSquadMax = SQUAD_MAX;
+
+        const positionPill = (pos) => {
+            const c = counts[pos];
+            const lim = SQUAD_LIMITS[pos];
+            const full = c >= lim.max;
+            const low = c < lim.min;
+            const color = full ? 'var(--danger)' : (low ? 'var(--accent-gold)' : 'var(--accent-teal)');
+            return `<span style="display:inline-flex;align-items:center;gap:.25rem;padding:.2rem .5rem;border-radius:6px;background:var(--bg-secondary);font-size:.8rem">
+                <strong>${pos}</strong>
+                <span style="color:${color};font-weight:600">${c}/${lim.max}</span>
+            </span>`;
+        };
 
         let content = `
             <div class="flex-between mb-2">
@@ -142,6 +167,20 @@ Router.register('#/market/:windowId', async (container, params) => {
                 <div class="stat-card">
                     <div class="stat-label">Robos Recibidos</div>
                     <div class="stat-value">${budget.sells_count}/${budget.max_sells}</div>
+                </div>
+            </div>
+
+            <div class="card mb-2" style="padding:.75rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+                    <div style="font-weight:600">
+                        👥 Plantilla: <span style="color:${total >= SQUAD_MAX ? 'var(--danger)' : 'var(--accent-teal)'}">${total}/${SQUAD_MAX}</span>
+                    </div>
+                    <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+                        ${positionPill('GK')}
+                        ${positionPill('DEF')}
+                        ${positionPill('MID')}
+                        ${positionPill('FWD')}
+                    </div>
                 </div>
             </div>
         `;
@@ -489,7 +528,24 @@ async function loadAvailablePlayers(leagueId, teamId, windowId) {
 
 function renderAvailablePlayers(leagueId, teamId, windowId, players) {
     const container = document.getElementById('available-players');
-    container.innerHTML = players.map(p => `
+    const counts = window._marketSquadCounts || { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+    const total = window._marketSquadTotal ?? 0;
+    const limits = window._marketSquadLimits || { GK: { max: 3 }, DEF: { max: 8 }, MID: { max: 8 }, FWD: { max: 8 } };
+    const SQUAD_MAX = window._marketSquadMax ?? 23;
+
+    container.innerHTML = players.map(p => {
+        const isOwn = p.current_team_id === teamId;
+        const squadFull = total >= SQUAD_MAX;
+        const positionFull = (counts[p.position] || 0) >= (limits[p.position]?.max ?? 99);
+        const blocked = !!p.is_blocked;
+        let label = 'Comprar';
+        let title = '';
+        if (isOwn) { label = 'Tuyo'; }
+        else if (blocked) { label = '🔒 Bloqueado'; title = 'El propietario lo ha bloqueado'; }
+        else if (squadFull) { label = '🚫 Plantilla llena'; title = `Tienes ${total}/${SQUAD_MAX}`; }
+        else if (positionFull) { label = `🚫 ${p.position} al máximo`; title = `${counts[p.position]}/${limits[p.position].max} en ${p.position}`; }
+        const disabled = isOwn || blocked || squadFull || positionFull;
+        return `
         <div class="player-card">
             <img src="${p.photo || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'" style="height:60px;width:auto">
             <div class="player-info">
@@ -502,12 +558,12 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players) {
             <span class="badge badge-small">${p.position}</span>
             <span class="stat-value" style="font-size:1rem">${formatMoney(p.market_value)}</span>
             <button class="btn btn-sm btn-primary" data-pid="${p.player_id}" data-amount="${p.clause_amount}"
-                ${(p.is_blocked || p.current_team_id === teamId) ? 'disabled' : ''}
+                ${disabled ? 'disabled' : ''} ${title ? `title="${title}"` : ''}
                 onclick="window.buyPlayer('${leagueId}', '${teamId}', '${windowId}', this)">
-                ${p.current_team_id === teamId ? 'Tuyo' : 'Comprar'}
+                ${label}
             </button>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
 window.buyPlayer = async function(leagueId, teamId, windowId, btn) {

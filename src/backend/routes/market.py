@@ -519,6 +519,8 @@ async def buy_player(
         if not result.get("success"):
             raise HTTPException(400, result.get("reason", "Transaction failed"))
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error buying player: {e}")
         raise HTTPException(500, str(e))
