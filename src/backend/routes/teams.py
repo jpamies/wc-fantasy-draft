@@ -1,10 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
+import logging
+import traceback
 from src.backend.database import get_db
 from src.backend.auth import get_current_team
 from src.backend.models import TeamOut, TeamPlayerOut, LineupUpdate
 
 router = APIRouter(prefix="/api/v1", tags=["teams"])
+logger = logging.getLogger("wc-fantasy.teams")
 
 
 async def _ensure_matchday_exists(db, matchday_id: str):
@@ -361,5 +364,22 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
 
         await db.commit()
         return {"ok": True}
+    except HTTPException:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        tb = traceback.format_exc()
+        logger.error(
+            f"update_matchday_lineup failed team_id={team_id} matchday_id={matchday_id} "
+            f"starters={body.starters} captain={body.captain} vice={body.vice_captain}\n{tb}"
+        )
+        raise HTTPException(500, f"Error guardando alineación: {type(e).__name__}: {e}")
     finally:
         await db.close()
