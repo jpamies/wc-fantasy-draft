@@ -136,7 +136,7 @@ Fuente primaria: `world-cup-list/data/*.json`
   "commissioner": "jordi",
   "settings": {
     "max_teams": 8,
-    "initial_budget": 500000000,
+    "initial_budget": 100000000,
     "draft_timer_seconds": 60,
     "max_clausulazos_per_window": 2,
     "auto_substitutions": true,

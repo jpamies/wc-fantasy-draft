@@ -227,7 +227,7 @@ para clausulazos y pujas?
 
 ### Decisión
 **Moneda virtual** (WC Coins / Fantasillones) con estas reglas:
-- Cada equipo empieza con un **presupuesto fijo** (ej: 500M fantasillones)
+- Cada equipo empieza con un **presupuesto fijo** (ej: 100M fantasillones)
 - El valor de la cláusula de cada jugador se basa en su **valor de mercado real** (Transfermarkt)
 - Los traspasos negociados pueden incluir jugadores + moneda
 - El presupuesto se recalcula al vender/comprar

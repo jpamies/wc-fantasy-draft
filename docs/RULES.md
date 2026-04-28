@@ -120,7 +120,7 @@ Para ligas que no quieran draft:
 ## 5. Economía (moneda virtual)
 
 ### Presupuesto inicial
-- Cada equipo empieza con **500M fantasillones** (ajustable por el comisionado).
+- Cada equipo empieza con **100M fantasillones** (ajustable por el comisionado).
 - En **modo draft**, el presupuesto solo se usa para traspasos y clausulazos.
 - En **modo clásico**, el presupuesto se usa también para fichar la plantilla inicial.
 
@@ -207,7 +207,7 @@ El comisionado tiene poderes especiales:
 |---|---|---|
 | Modo de selección | Draft / Clásico | Draft |
 | Nº de participantes | 4–32 | 8 |
-| Presupuesto inicial | 200M–1000M | 500M |
+| Presupuesto inicial | 50M–500M | 100M |
 | Timer del draft (seg) | 30–120 | 60 |
 | Clausulazos por ventana | 0–5 | 2 |
 | Sustituciones auto | Sí/No | Sí |

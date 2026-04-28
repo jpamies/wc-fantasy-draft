@@ -66,7 +66,7 @@ class LeagueOut(BaseModel):
     mode: str = "draft"
     status: str = "setup"
     max_teams: int = 10
-    initial_budget: int = 500000000
+    initial_budget: int = 100000000
     draft_timer_seconds: int = 60
     max_clausulazos_per_window: int = 2
     auto_substitutions: bool = True

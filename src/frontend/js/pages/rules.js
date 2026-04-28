@@ -125,7 +125,7 @@ Router.register('#/rules', async (container) => {
             <table style="font-size:.85rem">
                 <thead><tr><th>Acción</th><th>Efecto</th></tr></thead>
                 <tbody>
-                    <tr><td>Presupuesto inicial</td><td style="color:var(--accent-teal)">+500M</td></tr>
+                    <tr><td>Presupuesto inicial</td><td style="color:var(--accent-teal)">+100M</td></tr>
                     <tr><td>Clausulazo (comprador)</td><td style="color:var(--accent-red)">−cláusula del jugador</td></tr>
                     <tr><td>Clausulazo (vendedor)</td><td style="color:var(--accent-teal)">+cláusula del jugador</td></tr>
                     <tr><td>Liberar jugador</td><td style="color:var(--accent-teal)">+50% valor de mercado</td></tr>

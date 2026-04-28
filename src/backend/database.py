@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS leagues (
     mode TEXT NOT NULL DEFAULT 'draft' CHECK(mode IN ('draft','classic')),
     status TEXT NOT NULL DEFAULT 'setup' CHECK(status IN ('setup','draft_pending','draft_in_progress','active','completed')),
     max_teams INTEGER DEFAULT 10,
-    initial_budget INTEGER DEFAULT 500000000,
+    initial_budget INTEGER DEFAULT 100000000,
     draft_timer_seconds INTEGER DEFAULT 60,
     max_clausulazos_per_window INTEGER DEFAULT 2,
     auto_substitutions INTEGER DEFAULT 0,
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS fantasy_teams (
     owner_nick TEXT NOT NULL,
     display_name TEXT DEFAULT '',
     team_name TEXT NOT NULL,
-    budget INTEGER DEFAULT 500000000,
+    budget INTEGER DEFAULT 100000000,
     formation TEXT DEFAULT '4-3-3',
     protect_budget_allocated INTEGER DEFAULT 0,
     last_market_window_id INTEGER,
@@ -376,6 +376,19 @@ async def init_db():
             print("[DB] PostgreSQL schema created")
         else:
             print("[DB] PostgreSQL schema already exists, skipping")
+
+        # Backfill: budgets unified at 100M (was 500M before market-budget redesign)
+        try:
+            updated_leagues = await conn.fetchval(
+                "WITH u AS (UPDATE leagues SET initial_budget=100000000 WHERE initial_budget=500000000 RETURNING 1) SELECT count(*) FROM u"
+            )
+            updated_teams = await conn.fetchval(
+                "WITH u AS (UPDATE fantasy_teams SET budget=100000000 WHERE budget=500000000 RETURNING 1) SELECT count(*) FROM u"
+            )
+            if updated_leagues or updated_teams:
+                print(f"[DB] Migrated budgets 500M→100M: {updated_leagues} leagues, {updated_teams} teams")
+        except Exception as e:
+            print(f"[DB] Budget backfill skipped: {e}")
 
 
 async def close_pool():
