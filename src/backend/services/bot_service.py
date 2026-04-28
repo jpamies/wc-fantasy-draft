@@ -363,7 +363,7 @@ async def _set_clauses_for_one_bot(team_id: str, window_id: int, protect_budget:
                    p.position,
                    p.country_code,
                    COALESCE(p.market_value, 0) AS market_value,
-                   COALESCE((SELECT SUM(ms.points) FROM match_scores ms
+                   COALESCE((SELECT SUM(ms.total_points) FROM match_scores ms
                              WHERE ms.player_id = tp.player_id), 0) AS total_points
             FROM team_players tp
             JOIN players p ON tp.player_id = p.id
