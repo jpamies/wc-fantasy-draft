@@ -864,6 +864,16 @@ class MarketService:
             pick_number = current_turn[0]["pick_number"]
 
             if player_id:
+                # Ensure full player data is in local DB (the row may be a stub
+                # created by score sync without photo/club/detailed_position).
+                try:
+                    from src.backend.config import settings
+                    if settings.SIMULATOR_API_URL:
+                        from src.backend.services.simulator_client import ensure_player_in_db
+                        await ensure_player_in_db(player_id)
+                except Exception as e:
+                    logger.warning(f"ensure_player_in_db({player_id}) failed: {e}")
+
                 # Validate player exists and is available
                 player = await db.execute_fetchall(
                     "SELECT id, position FROM players WHERE id=$1", (player_id,)
