@@ -144,7 +144,7 @@ class MarketService:
     # Phases of the FIFA WC 2026 that get a market window between them.
     # Order matters: each window is created for the phase named here AFTER the
     # previous phase's matchdays have all finished.
-    AUTO_MARKET_PHASES = ["r32", "r16", "quarter", "semi", "final"]
+    AUTO_MARKET_PHASES = ["r32", "r16", "quarter", "semi"]
 
     @staticmethod
     async def ensure_league_market_windows(league_id: str) -> int:
@@ -516,13 +516,18 @@ class MarketService:
                 SELECT DISTINCT tp.player_id, p.name, p.position, p.country_code, p.photo, p.market_value,
                        tp.team_id as current_team_id, ft.team_name as current_team_name,
                        COALESCE(pc.clause_amount, 0) as clause_amount,
-                       COALESCE(pc.is_blocked, 0) as is_blocked
+                       COALESCE(pc.is_blocked, 0) as is_blocked,
+                       COALESCE(pts.total, 0) as total_points
                 FROM team_players tp
                 JOIN fantasy_teams ft ON tp.team_id = ft.id
                 JOIN players p ON tp.player_id = p.id
                 LEFT JOIN player_clauses pc ON pc.player_id = tp.player_id 
                     AND pc.team_id = tp.team_id 
                     AND pc.market_window_id = $1
+                LEFT JOIN (
+                    SELECT player_id, SUM(total_points) as total
+                    FROM match_scores GROUP BY player_id
+                ) pts ON pts.player_id = tp.player_id
                 WHERE ft.league_id = $2
             """
 

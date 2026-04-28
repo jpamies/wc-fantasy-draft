@@ -255,7 +255,6 @@ _AUTO_MARKET_TRANSITIONS = [
     ("r32", "r16"),
     ("r16", "quarter"),
     ("quarter", "semi"),
-    ("semi", "final"),
 ]
 
 

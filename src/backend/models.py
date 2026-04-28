@@ -42,6 +42,7 @@ class CountryOut(BaseModel):
     confederation: str | None = ""
     group_letter: str | None = None
     player_count: int = 0
+    tournament_status: str | None = "alive"
 
 
 # --- Leagues ---

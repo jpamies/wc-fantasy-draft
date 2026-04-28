@@ -87,11 +87,29 @@ async def get_player(player_id: str):
 
 @router.get("/countries", response_model=list[CountryOut])
 async def list_countries():
+    from src.backend.database import get_db
+
     if _use_simulator:
         from src.backend.services.simulator_client import fetch_countries
-        return [CountryOut(**c) for c in await fetch_countries()]
+        sim_countries = await fetch_countries()
+        # Enrich with tournament_status from local DB
+        db = await get_db()
+        try:
+            status_rows = await db.execute_fetchall(
+                "SELECT code, tournament_status FROM countries WHERE tournament_status IS NOT NULL"
+            )
+            status_map = {r["code"]: r["tournament_status"] for r in status_rows}
+        except Exception:
+            status_map = {}
+        finally:
+            await db.close()
+        result = []
+        for c in sim_countries:
+            out = CountryOut(**c)
+            out.tournament_status = status_map.get(out.code, "alive")
+            result.append(out)
+        return result
 
-    from src.backend.database import get_db
     db = await get_db()
     try:
         rows = await db.execute_fetchall(

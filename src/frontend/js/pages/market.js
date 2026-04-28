@@ -589,7 +589,10 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players) {
                 </div>
             </div>
             <span class="badge badge-small">${p.position}</span>
-            <span class="stat-value" style="font-size:1rem">${formatMoney(p.market_value)}</span>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.2rem">
+                <span class="stat-value" style="font-size:1rem">${formatMoney(p.market_value)}</span>
+                <span style="font-size:.75rem;color:var(--accent-teal);font-weight:600">⭐ ${p.total_points || 0} pts</span>
+            </div>
             <button class="btn btn-sm btn-primary" data-pid="${p.player_id}" data-amount="${p.clause_amount}"
                 ${disabled ? 'disabled' : ''} ${title ? `title="${title}"` : ''}
                 onclick="window.buyPlayer('${leagueId}', '${teamId}', '${windowId}', this)">

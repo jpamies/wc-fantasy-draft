@@ -43,9 +43,10 @@ Router.register('#/draft', async (container) => {
         autodraftEnabled = adStatus.team_autodraft || false;
     } catch {}
 
-    // Load countries for filter
+    // Load countries for filter (only alive countries)
     try {
-        countries = await API.get('/countries');
+        const allCountries = await API.get('/countries');
+        countries = allCountries.filter(c => c.tournament_status !== 'eliminated');
         countries.sort((a, b) => a.name.localeCompare(b.name));
     } catch { countries = []; }
 
@@ -525,7 +526,8 @@ async function renderRepositionDraft(container, leagueId, windowId) {
     let lastPickCount = 0;
 
     try {
-        countries = await API.get('/countries');
+        const allCountries = await API.get('/countries');
+        countries = allCountries.filter(c => c.tournament_status !== 'eliminated');
         countries.sort((a, b) => a.name.localeCompare(b.name));
     } catch { countries = []; }
 
