@@ -5,6 +5,22 @@ from src.backend.config import settings
 _client: httpx.AsyncClient | None = None
 
 
+def _tournament_params() -> dict:
+    """Return query params to scope requests to the canonical tournament."""
+    tid = settings.SIMULATOR_TOURNAMENT_ID
+    if tid and tid != 1:
+        return {"tournament_id": tid}
+    return {}
+
+
+def _auth_headers() -> dict:
+    """Return headers for write operations on the canonical tournament."""
+    key = settings.SIMULATOR_ADMIN_KEY
+    if key:
+        return {"X-Manage-Token": key}
+    return {}
+
+
 def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
@@ -51,7 +67,7 @@ async def fetch_players(
     offset: int = 0,
 ) -> list[dict]:
     """Fetch players from wc-simulator, mapped to fantasy format."""
-    params: dict = {"limit": limit, "offset": offset, "sort": sort}
+    params: dict = {"limit": limit, "offset": offset, "sort": sort, **_tournament_params()}
     if country:
         params["country"] = country
     if position:
@@ -86,7 +102,7 @@ async def fetch_countries() -> list[dict]:
 async def fetch_calendar() -> list[dict]:
     """Fetch full calendar (matchdays + matches) from wc-simulator."""
     client = get_client()
-    resp = await client.get("/api/v1/tournament/calendar", timeout=15.0)
+    resp = await client.get("/api/v1/tournament/calendar", params=_tournament_params(), timeout=15.0)
     resp.raise_for_status()
     return resp.json()
 
@@ -94,7 +110,7 @@ async def fetch_calendar() -> list[dict]:
 async def fetch_tournament_overview() -> dict:
     """Fetch tournament overview (current_phase, matches_played, etc.)."""
     client = get_client()
-    resp = await client.get("/api/v1/tournament/overview", timeout=10.0)
+    resp = await client.get("/api/v1/tournament/overview", params=_tournament_params(), timeout=10.0)
     resp.raise_for_status()
     return resp.json()
 
@@ -103,7 +119,7 @@ async def fetch_standings() -> dict[str, list[dict]]:
     """Fetch group standings from wc-simulator.
     Returns {group_letter: [team_dicts sorted by position]}."""
     client = get_client()
-    resp = await client.get("/api/v1/tournament/standings", timeout=10.0)
+    resp = await client.get("/api/v1/tournament/standings", params=_tournament_params(), timeout=10.0)
     resp.raise_for_status()
     return resp.json()
 
@@ -111,7 +127,7 @@ async def fetch_standings() -> dict[str, list[dict]]:
 async def fetch_squad_players(country_code: str) -> list[dict]:
     """Fetch squad-selected players for a country."""
     client = get_client()
-    resp = await client.get(f"/api/v1/squads/{country_code}")
+    resp = await client.get(f"/api/v1/squads/{country_code}", params=_tournament_params())
     if resp.status_code == 404:
         return []
     resp.raise_for_status()

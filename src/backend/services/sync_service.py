@@ -118,7 +118,10 @@ async def sync_results() -> dict:
             base_url=settings.SIMULATOR_API_URL.rstrip("/"),
             timeout=30.0,
         ) as client:
-            resp = await client.get("/api/v1/matches/finished-with-stats")
+            params = {}
+            if settings.SIMULATOR_TOURNAMENT_ID and settings.SIMULATOR_TOURNAMENT_ID != 1:
+                params["tournament_id"] = settings.SIMULATOR_TOURNAMENT_ID
+            resp = await client.get("/api/v1/matches/finished-with-stats", params=params)
             resp.raise_for_status()
             finished = resp.json()
         
