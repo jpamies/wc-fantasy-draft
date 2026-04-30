@@ -8,8 +8,6 @@ class Settings(BaseSettings):
     # Legacy SQLite path kept for migration scripts; not used at runtime
     DATABASE_PATH: str = "data/wc_fantasy.db"
     SIMULATOR_API_URL: str = ""
-    SIMULATOR_ADMIN_KEY: str = ""
-    SIMULATOR_TOURNAMENT_ID: int = 1
     CORS_ORIGINS: str = "*"
     JWT_ALGORITHM: str = "HS256"
 
