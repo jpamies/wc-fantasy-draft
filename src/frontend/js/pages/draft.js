@@ -199,9 +199,11 @@ Router.register('#/draft', async (container) => {
                     <div class="player-name"><a href="#/player/${p.id}" style="color:inherit;text-decoration:none">${p.name}</a></div>
                     <div class="player-meta">${p.country_code} · ${p.club}</div>
                 </div>
-                ${posBadge(p.position)}
-                <span class="player-ovr">${p.strength || ''}</span>
-                <div class="player-value">${formatMoney(p.market_value)}</div>
+                <div class="draft-player-meta">
+                    ${posBadge(p.position)}
+                    <span class="player-ovr">OVR ${p.strength || '-'}</span>
+                    <div class="player-value">${formatMoney(p.market_value)}</div>
+                </div>
                 ${(canQueue || canPick) ? `
                     <div class="draft-player-actions">
                         ${canQueue ? `<button class="btn btn-sm ${inQueue ? 'btn-teal' : 'btn-outline'} queue-add-btn" data-pid="${p.id}" title="${inQueue ? 'En cola' : 'Añadir a cola'}">${inQueue ? '✓' : '+'}</button>` : ''}
