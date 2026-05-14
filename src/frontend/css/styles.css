@@ -112,6 +112,7 @@ tr:hover { background: var(--bg-hover); }
 .player-meta { font-size: .8rem; color: var(--text-secondary); }
 .player-value { font-size: .85rem; color: var(--accent-gold); font-weight: 600; }
 .player-ovr { font-size: 1rem; font-weight: 700; color: var(--accent); min-width: 24px; text-align: center; }
+.draft-player-actions { display: flex; gap: .35rem; margin-left: auto; flex-shrink: 0; }
 
 /* Draft specific */
 .draft-timer { font-size: 2rem; font-weight: 700; color: var(--accent-gold); text-align: center; }
@@ -184,6 +185,27 @@ tr:hover { background: var(--bg-hover); }
     .hero h1 { font-size: 1.8rem; }
     #app { padding: 1rem; }
     .grid-2, .grid-3 { grid-template-columns: 1fr; }
+
+    /* Draft player list on mobile: keep Pick button inside the card */
+    .draft-col-main #player-list .player-card {
+        flex-wrap: wrap;
+        gap: .4rem .55rem;
+    }
+    .draft-col-main #player-list .player-card .player-info {
+        flex: 1 1 calc(100% - 52px);
+        min-width: 0;
+    }
+    .draft-col-main #player-list .player-card .player-value,
+    .draft-col-main #player-list .player-card .player-ovr,
+    .draft-col-main #player-list .player-card .badge {
+        font-size: .75rem;
+    }
+    .draft-col-main #player-list .player-card .draft-player-actions {
+        width: 100%;
+        margin-left: 0;
+        justify-content: flex-end;
+        margin-top: .1rem;
+    }
 }
 
 /* Money */

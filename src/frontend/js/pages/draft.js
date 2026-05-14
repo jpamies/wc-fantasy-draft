@@ -202,8 +202,12 @@ Router.register('#/draft', async (container) => {
                 ${posBadge(p.position)}
                 <span class="player-ovr">${p.strength || ''}</span>
                 <div class="player-value">${formatMoney(p.market_value)}</div>
-                ${canQueue ? `<button class="btn btn-sm ${inQueue ? 'btn-teal' : 'btn-outline'} queue-add-btn" data-pid="${p.id}" title="${inQueue ? 'En cola' : 'Añadir a cola'}">${inQueue ? '✓' : '+'}</button>` : ''}
-                ${canPick ? `<button class="btn btn-primary btn-sm pick-btn" data-pid="${p.id}">Pick</button>` : ''}
+                ${(canQueue || canPick) ? `
+                    <div class="draft-player-actions">
+                        ${canQueue ? `<button class="btn btn-sm ${inQueue ? 'btn-teal' : 'btn-outline'} queue-add-btn" data-pid="${p.id}" title="${inQueue ? 'En cola' : 'Añadir a cola'}">${inQueue ? '✓' : '+'}</button>` : ''}
+                        ${canPick ? `<button class="btn btn-primary btn-sm pick-btn" data-pid="${p.id}">Pick</button>` : ''}
+                    </div>
+                ` : ''}
             </div>`;
         }).join('');
     }
