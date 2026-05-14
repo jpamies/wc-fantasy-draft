@@ -337,6 +337,19 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
             await db.execute("DELETE FROM draft_settings WHERE draft_id=$1", (dict(d)["id"],))
             await db.execute("DELETE FROM draft_picks WHERE draft_id=$1", (dict(d)["id"],))
         await db.execute("DELETE FROM drafts WHERE league_id=$1", (league_id,))
+
+        # Clear market tables before deleting teams/league to avoid FK violations
+        market_win_rows = await db.execute_fetchall(
+            "SELECT id FROM market_windows WHERE league_id=$1", (league_id,)
+        )
+        for mw in market_win_rows:
+            mw_id = mw["id"]
+            await db.execute("DELETE FROM reposition_draft_picks WHERE market_window_id=$1", (mw_id,))
+            await db.execute("DELETE FROM market_transactions WHERE market_window_id=$1", (mw_id,))
+            await db.execute("DELETE FROM market_budgets WHERE market_window_id=$1", (mw_id,))
+            await db.execute("DELETE FROM player_clauses WHERE market_window_id=$1", (mw_id,))
+        await db.execute("DELETE FROM market_windows WHERE league_id=$1", (league_id,))
+
         # Delete transfers
         await db.execute("DELETE FROM transfers WHERE league_id=$1", (league_id,))
         # Delete matchday lineups for teams in this league
