@@ -298,3 +298,30 @@ tr:hover { background: var(--bg-hover); }
 .chip-badge.vc { background: var(--accent-blue); color: #fff; }
 .pos-section { padding: .3rem 0 .15rem; font-size: .75rem; color: var(--text-muted); border-bottom: 1px solid var(--border); margin-top: .25rem; }
 .pos-section:first-child { margin-top: 0; }
+
+/* Mobile: lineup/bench player chip list fixes */
+@media (max-width: 768px) {
+    .card .player-chip {
+        width: 100%;
+        min-width: 0;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: .5rem;
+        padding: .4rem .2rem;
+        box-sizing: border-box;
+    }
+    .card .player-chip-info {
+        min-width: 0;
+        flex: 1 1 120px;
+    }
+    .card .chip-actions {
+        flex-direction: row;
+        gap: .2rem;
+        margin-left: auto;
+        min-width: 0;
+    }
+    .card .player-chip img {
+        width: 36px;
+        height: 36px;
+    }
+}
