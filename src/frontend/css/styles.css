@@ -112,10 +112,20 @@ tr:hover { background: var(--bg-hover); }
 .player-meta { font-size: .8rem; color: var(--text-secondary); }
 .player-value { font-size: .85rem; color: var(--accent-gold); font-weight: 600; }
 .player-ovr { font-size: 1rem; font-weight: 700; color: var(--accent); min-width: 24px; text-align: center; }
-.draft-player-meta { display: flex; align-items: center; gap: .35rem; margin-left: auto; flex-shrink: 0; }
+.draft-player-card {
+    display: block;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-card) 88%, black 12%);
+    padding: .6rem;
+}
+.draft-player-top { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.draft-player-top .player-info { min-width: 0; }
+.draft-player-top .player-name,
+.draft-player-top .player-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.draft-player-meta { display: flex; align-items: center; gap: .35rem; margin-top: .45rem; flex-wrap: wrap; }
 .draft-player-meta .player-value { white-space: nowrap; }
 .draft-player-meta .player-ovr { font-size: .8rem; min-width: 0; color: var(--text-secondary); font-weight: 600; }
-.draft-player-actions { display: flex; gap: .35rem; margin-left: auto; flex-shrink: 0; }
+.draft-player-actions { display: flex; gap: .35rem; margin-top: .45rem; justify-content: flex-end; }
 
 /* Draft specific */
 .draft-timer { font-size: 2rem; font-weight: 700; color: var(--accent-gold); text-align: center; }
@@ -190,37 +200,31 @@ tr:hover { background: var(--bg-hover); }
     .grid-2, .grid-3 { grid-template-columns: 1fr; }
 
     /* Draft player list on mobile: keep Pick button inside the card */
-    .draft-col-main #player-list .player-card {
-        flex-wrap: wrap;
-        gap: .4rem .55rem;
+    .draft-col-main #player-list .draft-player-card {
+        padding: .65rem;
     }
-    .draft-col-main #player-list .player-card .player-info {
-        flex: 1 1 calc(100% - 52px);
-        min-width: 0;
-    }
-    .draft-col-main #player-list .player-card .draft-player-meta {
-        width: calc(100% - 52px);
-        margin-left: 52px;
+    .draft-col-main #player-list .draft-player-meta {
+        width: 100%;
+        margin-top: .4rem;
         justify-content: flex-start;
-        gap: .3rem;
+        gap: .28rem;
     }
-    .draft-col-main #player-list .player-card .draft-player-meta .player-value,
-    .draft-col-main #player-list .player-card .draft-player-meta .player-ovr,
-    .draft-col-main #player-list .player-card .draft-player-meta .badge {
+    .draft-col-main #player-list .draft-player-meta .player-value,
+    .draft-col-main #player-list .draft-player-meta .player-ovr,
+    .draft-col-main #player-list .draft-player-meta .badge {
         font-size: .75rem;
     }
-    .draft-col-main #player-list .player-card .draft-player-actions {
+    .draft-col-main #player-list .draft-player-actions {
         width: 100%;
-        margin-left: 0;
-        justify-content: flex-end;
+        justify-content: stretch;
         flex-direction: column;
-        align-items: flex-end;
+        align-items: stretch;
         gap: .25rem;
-        margin-top: .1rem;
+        margin-top: .45rem;
     }
-    .draft-col-main #player-list .player-card .draft-player-actions .btn {
+    .draft-col-main #player-list .draft-player-actions .btn {
         width: 100%;
-        max-width: 96px;
+        max-width: none;
     }
 }
 
