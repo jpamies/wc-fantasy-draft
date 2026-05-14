@@ -129,6 +129,37 @@ tr:hover { background: var(--bg-hover); }
 .draft-player-meta .player-ovr { font-size: .8rem; min-width: 0; color: var(--text-secondary); font-weight: 600; }
 .draft-player-actions { display: flex; gap: .35rem; margin-top: .45rem; justify-content: flex-end; }
 
+/* Desktop: keep draft rows compact when there is enough width */
+@media (min-width: 769px) {
+    .draft-col-main #player-list .draft-player-card {
+        display: flex;
+        align-items: center;
+        gap: .6rem;
+        padding: .5rem .6rem;
+    }
+    .draft-col-main #player-list .draft-player-top {
+        flex: 1;
+        min-width: 0;
+        align-items: center;
+    }
+    .draft-col-main #player-list .draft-player-left {
+        flex: 1;
+        min-width: 0;
+    }
+    .draft-col-main #player-list .draft-player-meta {
+        flex-direction: row;
+        align-items: center;
+        gap: .35rem;
+        margin-top: 0;
+        margin-left: auto;
+    }
+    .draft-col-main #player-list .draft-player-actions {
+        margin-top: 0;
+        margin-left: .3rem;
+        flex-shrink: 0;
+    }
+}
+
 /* Draft specific */
 .draft-timer { font-size: 2rem; font-weight: 700; color: var(--accent-gold); text-align: center; }
 .draft-turn { text-align: center; padding: 1rem; margin-bottom: 1rem; background: var(--bg-card); border-radius: var(--radius); border: 2px solid var(--accent-gold); }
