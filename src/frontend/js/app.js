@@ -21,6 +21,23 @@ window.clerkReady = (async function initClerk() {
 
 (async function() {
 
+    async function loadRuntimeVersion() {
+        const el = document.getElementById('app-version');
+        if (!el) return;
+        try {
+            const res = await fetch('/api/v1/health', { cache: 'no-store' });
+            if (!res.ok) throw new Error('health failed');
+            const data = await res.json();
+            const version = data.version || 'unknown';
+            const build = data.build || 'unknown';
+            el.textContent = `version: ${version} (${String(build).slice(0, 8)})`;
+        } catch {
+            el.textContent = 'version: unavailable';
+        }
+    }
+
+    await loadRuntimeVersion();
+
     // Helper to get Clerk user info
     window.getClerkUser = () => {
         const user = window.Clerk?.user;

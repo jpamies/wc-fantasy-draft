@@ -24,6 +24,16 @@
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
 a { color: var(--accent-teal); text-decoration: none; }
 
+/* Footer version */
+.app-footer {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    text-align: right;
+}
+
 /* Nav */
 nav { display: flex; align-items: center; gap: 1rem; padding: .75rem 1.5rem; background: var(--bg-secondary); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; flex-wrap: wrap; }
 .nav-brand { font-weight: 700; font-size: 1.1rem; color: var(--accent-gold); white-space: nowrap; }

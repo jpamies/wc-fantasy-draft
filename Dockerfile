@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ARG WCF_BUILD_SHA=dev
+ENV WCF_BUILD_SHA=${WCF_BUILD_SHA}
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

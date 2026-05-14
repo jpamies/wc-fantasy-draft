@@ -12,6 +12,10 @@ from src.backend.config import settings
 from src.backend.routes import leagues, players, teams, draft, market, scoring
 
 
+APP_VERSION = os.getenv("WCF_APP_VERSION", "1.0.0")
+BUILD_SHA = os.getenv("WCF_BUILD_SHA", "dev")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database
@@ -388,7 +392,7 @@ async def _auto_market_window_creator():
 app = FastAPI(
     title="WC Fantasy 2026",
     description="Fantasy football API for the 2026 FIFA World Cup",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -426,7 +430,12 @@ app.include_router(scoring.router)
 
 @app.get("/api/v1/health")
 async def health():
-    return {"status": "ok", "app": "wc-fantasy-2026"}
+    return {
+        "status": "ok",
+        "app": "wc-fantasy-2026",
+        "version": APP_VERSION,
+        "build": BUILD_SHA,
+    }
 
 
 # Serve frontend static files (must be LAST — mount("/") catches everything

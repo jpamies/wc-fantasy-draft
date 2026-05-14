@@ -329,6 +329,11 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         raise HTTPException(403, "Commissioner only")
     db = await get_db()
     try:
+        team_rows = await db.execute_fetchall(
+            "SELECT id FROM fantasy_teams WHERE league_id=$1", (league_id,)
+        )
+        team_ids = [r["id"] for r in team_rows]
+
         # Get draft id for this league
         draft_rows = await db.execute_fetchall(
             "SELECT id FROM drafts WHERE league_id=$1", (league_id,)
@@ -336,6 +341,18 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         for d in draft_rows:
             await db.execute("DELETE FROM draft_settings WHERE draft_id=$1", (dict(d)["id"],))
             await db.execute("DELETE FROM draft_picks WHERE draft_id=$1", (dict(d)["id"],))
+
+        # Defensive cleanup for legacy/orphan rows linked by team_id
+        if team_ids:
+            placeholders = ",".join(f"${i+1}" for i in range(len(team_ids)))
+            await db.execute(
+                f"DELETE FROM draft_settings WHERE team_id IN ({placeholders})",
+                team_ids,
+            )
+            await db.execute(
+                f"DELETE FROM draft_picks WHERE team_id IN ({placeholders})",
+                team_ids,
+            )
         await db.execute("DELETE FROM drafts WHERE league_id=$1", (league_id,))
 
         # Clear market tables before deleting teams/league to avoid FK violations
@@ -352,6 +369,12 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
 
         # Delete transfers
         await db.execute("DELETE FROM transfers WHERE league_id=$1", (league_id,))
+        if team_ids:
+            placeholders = ",".join(f"${i+1}" for i in range(len(team_ids)))
+            await db.execute(
+                f"DELETE FROM transfers WHERE from_team_id IN ({placeholders}) OR to_team_id IN ({placeholders})",
+                team_ids,
+            )
         # Delete matchday lineups for teams in this league
         await db.execute(
             "DELETE FROM matchday_lineups WHERE team_id IN (SELECT id FROM fantasy_teams WHERE league_id=$1)",
@@ -368,6 +391,9 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         await db.execute("DELETE FROM leagues WHERE id=$1", (league_id,))
         await db.commit()
         return {"ok": True}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(500, f"Failed to delete league: {e}")
     finally:
         await db.close()
 
