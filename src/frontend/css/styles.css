@@ -118,11 +118,13 @@ tr:hover { background: var(--bg-hover); }
     background: color-mix(in srgb, var(--bg-card) 88%, black 12%);
     padding: .6rem;
 }
-.draft-player-top { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.draft-player-top { display: flex; justify-content: space-between; align-items: flex-start; gap: .7rem; min-width: 0; }
+.draft-player-left { display: flex; align-items: center; gap: .6rem; min-width: 0; flex: 1; }
+.draft-player-card img { width: 48px; height: 48px; }
 .draft-player-top .player-info { min-width: 0; }
 .draft-player-top .player-name,
 .draft-player-top .player-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.draft-player-meta { display: flex; align-items: center; gap: .35rem; margin-top: .45rem; flex-wrap: wrap; }
+.draft-player-meta { display: flex; flex-direction: column; align-items: flex-end; gap: .2rem; margin-top: 0; flex-shrink: 0; }
 .draft-player-meta .player-value { white-space: nowrap; }
 .draft-player-meta .player-ovr { font-size: .8rem; min-width: 0; color: var(--text-secondary); font-weight: 600; }
 .draft-player-actions { display: flex; gap: .35rem; margin-top: .45rem; justify-content: flex-end; }
@@ -203,11 +205,13 @@ tr:hover { background: var(--bg-hover); }
     .draft-col-main #player-list .draft-player-card {
         padding: .65rem;
     }
+    .draft-col-main #player-list .draft-player-card img {
+        width: 50px;
+        height: 50px;
+    }
     .draft-col-main #player-list .draft-player-meta {
-        width: 100%;
-        margin-top: .4rem;
-        justify-content: flex-start;
-        gap: .28rem;
+        align-items: flex-end;
+        gap: .18rem;
     }
     .draft-col-main #player-list .draft-player-meta .player-value,
     .draft-col-main #player-list .draft-player-meta .player-ovr,
