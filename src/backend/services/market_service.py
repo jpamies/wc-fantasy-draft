@@ -564,6 +564,19 @@ class MarketService:
                         (window_id, team_id, budget_amount, budget_amount),
                     )
 
+            # Execute SELL releases first so freed slots are available for
+            # clause attempt resolution and the open-market buying phase.
+            released = await MarketService._execute_marked_releases(db, window_id, league_id)
+            if released:
+                await MarketService._record_news_event(
+                    db,
+                    league_id=league_id,
+                    event_type="release_summary",
+                    title="Jugadores liberados al abrir mercado",
+                    body=f"Jugadores liberados: {released}",
+                    related_window_id=window_id,
+                )
+
             league_cfg = await db.execute_fetchall(
                 "SELECT max_clausulazos_per_window FROM leagues WHERE id=$1",
                 (league_id,),
@@ -600,20 +613,10 @@ class MarketService:
         try:
             window = await MarketService.get_market_window(window_id)
             league_id = window["league_id"]
-            released = await MarketService._execute_marked_releases(db, window_id, league_id)
             await db.execute(
                 "UPDATE market_windows SET status='market_closed', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
-            if released:
-                await MarketService._record_news_event(
-                    db,
-                    league_id=league_id,
-                    event_type="release_summary",
-                    title="Liberaciones ejecutadas",
-                    body=f"Jugadores liberados: {released}",
-                    related_window_id=window_id,
-                )
             await db.commit()
             return await MarketService.get_market_window(window_id)
         except Exception as e:
