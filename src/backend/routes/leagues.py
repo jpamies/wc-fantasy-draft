@@ -19,6 +19,13 @@ def _gen_code(length: int = 6) -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 
+async def _table_exists(db, table_name: str) -> bool:
+    return bool(await db.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name=$1)",
+        (table_name,),
+    ))
+
+
 @router.post("/leagues", response_model=LeagueOut)
 async def create_league(body: LeagueCreate):
     db = await get_db()
@@ -441,13 +448,16 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         )
         for mw in market_win_rows:
             mw_id = mw["id"]
-            await db.execute("DELETE FROM reposition_draft_picks WHERE market_window_id=$1", (mw_id,))
-            await db.execute("DELETE FROM clause_attempts WHERE market_window_id=$1", (mw_id,))
+            if await _table_exists(db, "reposition_draft_picks"):
+                await db.execute("DELETE FROM reposition_draft_picks WHERE market_window_id=$1", (mw_id,))
+            if await _table_exists(db, "clause_attempts"):
+                await db.execute("DELETE FROM clause_attempts WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM market_transactions WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM market_budgets WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM player_clauses WHERE market_window_id=$1", (mw_id,))
         await db.execute("DELETE FROM market_windows WHERE league_id=$1", (league_id,))
-        await db.execute("DELETE FROM news_events WHERE league_id=$1", (league_id,))
+        if await _table_exists(db, "news_events"):
+            await db.execute("DELETE FROM news_events WHERE league_id=$1", (league_id,))
 
         # Delete transfers
         await db.execute("DELETE FROM transfers WHERE league_id=$1", (league_id,))
@@ -560,13 +570,16 @@ async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_te
         )
         for mw in market_win_rows:
             mw_id = mw["id"]
-            await db.execute("DELETE FROM reposition_draft_picks WHERE market_window_id=$1", (mw_id,))
-            await db.execute("DELETE FROM clause_attempts WHERE market_window_id=$1", (mw_id,))
+            if await _table_exists(db, "reposition_draft_picks"):
+                await db.execute("DELETE FROM reposition_draft_picks WHERE market_window_id=$1", (mw_id,))
+            if await _table_exists(db, "clause_attempts"):
+                await db.execute("DELETE FROM clause_attempts WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM market_transactions WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM market_budgets WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM player_clauses WHERE market_window_id=$1", (mw_id,))
         await db.execute("DELETE FROM market_windows WHERE league_id=$1", (league_id,))
-        await db.execute("DELETE FROM news_events WHERE league_id=$1", (league_id,))
+        if await _table_exists(db, "news_events"):
+            await db.execute("DELETE FROM news_events WHERE league_id=$1", (league_id,))
 
         # 3. Clear all team players and lineups for this league
         await db.execute(
