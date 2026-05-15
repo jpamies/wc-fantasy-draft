@@ -645,7 +645,8 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'mar
         const positionFull = (counts[p.position] || 0) >= (limits[p.position]?.max ?? 99);
         const blocked = !!p.is_blocked;
         const isClauseMode = mode === 'clause_window';
-        let label = isClauseMode ? 'Enviar clausulazo' : 'Comprar';
+        const isMarketOpen = mode === 'market_open';
+        let label = isClauseMode ? 'Enviar clausulazo' : (isMarketOpen ? 'Ofertar' : 'Comprar');
         let title = '';
         if (isOwn) { label = 'Tuyo'; }
         else if (blocked) { label = '🔒 Bloqueado'; title = 'El propietario lo ha bloqueado'; }
@@ -681,12 +682,14 @@ window.buyPlayer = async function(leagueId, teamId, windowId, btn, mode = 'marke
 
     const question = mode === 'clause_window'
         ? `¿Enviar clausulazo por ${formatMoney(amount)}? Se resolverá al cerrar la fase.`
+        : mode === 'market_open'
+        ? `¿Enviar oferta por ${formatMoney(amount)}? Se resolverá por sorteo al cerrar el mercado.`
         : `¿Comprar este jugador por ${formatMoney(amount)}?`;
     if (!confirm(question)) return;
 
     try {
         await API.post(`/teams/${teamId}/market/${windowId}/buy-player`, { player_id: playerId });
-        showToast(mode === 'clause_window' ? 'Clausulazo enviado' : '¡Jugador comprado!', 'success');
+        showToast(mode === 'clause_window' ? 'Clausulazo enviado' : mode === 'market_open' ? '¡Oferta enviada! Se resuelve al cerrar el mercado' : '¡Jugador comprado!', 'success');
         Router.handleRoute();
     } catch (err) {
         showToast(err.message, 'error');

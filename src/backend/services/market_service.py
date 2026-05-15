@@ -608,11 +608,34 @@ class MarketService:
 
     @staticmethod
     async def close_market(window_id: int) -> Dict[str, Any]:
-        """Close market window and prepare for reposition draft."""
+        """Close market window: resolve pending clause attempts then close."""
         db = await get_db()
         try:
             window = await MarketService.get_market_window(window_id)
             league_id = window["league_id"]
+
+            # Resolve any pending clause attempts submitted during market_open
+            league_cfg = await db.execute_fetchall(
+                "SELECT max_clausulazos_per_window FROM leagues WHERE id=$1",
+                (league_id,),
+            )
+            max_clausulazos = league_cfg[0]["max_clausulazos_per_window"] if league_cfg else 2
+            clause_result = await MarketService._resolve_clause_attempts(
+                db=db,
+                window_id=window_id,
+                league_id=league_id,
+                max_per_team=max_clausulazos,
+            )
+            if clause_result["executed"] + clause_result["failed"] > 0:
+                await MarketService._record_news_event(
+                    db,
+                    league_id=league_id,
+                    event_type="clause_resolution",
+                    title=f"Resolución de clausulazos al cerrar mercado",
+                    body=f"Ejecutados: {clause_result['executed']} · Fallidos: {clause_result['failed']}",
+                    related_window_id=window_id,
+                )
+
             await db.execute(
                 "UPDATE market_windows SET status='market_closed', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
@@ -695,7 +718,11 @@ class MarketService:
 
     @staticmethod
     async def get_team_clauses(window_id: int, team_id: str) -> List[Dict[str, Any]]:
-        """Get all clauses set by a team for a market window."""
+        """Get all clauses set by a team for a market window.
+
+        If no clauses exist for this window yet, falls back to the most recent
+        previous window so users see their old values as defaults.
+        """
         db = await get_db()
         try:
             clauses = await db.execute_fetchall(
@@ -705,7 +732,31 @@ class MarketService:
                    WHERE pc.market_window_id=$1 AND pc.team_id=$2""",
                 (window_id, team_id),
             )
-            return [dict(c) for c in clauses]
+            if clauses:
+                return [dict(c) for c in clauses]
+
+            # No clauses yet — load from previous window (players still owned)
+            window = await MarketService.get_market_window(window_id)
+            if not window:
+                return []
+            prev = await db.execute_fetchall(
+                """SELECT id FROM market_windows
+                   WHERE league_id=$1 AND id < $2
+                   ORDER BY id DESC LIMIT 1""",
+                (window["league_id"], window_id),
+            )
+            if not prev:
+                return []
+            prev_id = prev[0]["id"]
+            prev_clauses = await db.execute_fetchall(
+                """SELECT pc.player_id, p.name, pc.clause_amount, pc.is_blocked
+                   FROM player_clauses pc
+                   JOIN players p ON pc.player_id = p.id
+                   JOIN team_players tp ON tp.player_id = pc.player_id AND tp.team_id = pc.team_id
+                   WHERE pc.market_window_id=$1 AND pc.team_id=$2""",
+                (prev_id, team_id),
+            )
+            return [dict(c) for c in prev_clauses]
         finally:
             await db.close()
 
@@ -780,9 +831,9 @@ class MarketService:
             window = await MarketService.get_market_window(window_id)
             if not window:
                 return {"success": False, "reason": "Market window not found"}
-            if window["status"] == "clause_window":
+            if window["status"] in ("clause_window", "market_open"):
                 return await MarketService.submit_clause_attempt(window_id, buyer_team_id, player_id)
-            if window["status"] != "market_open":
+            if window["status"] not in ("clause_window", "market_open"):
                 return {"success": False, "reason": "Market is not open"}
 
             # Get player's current owner and clause
@@ -935,22 +986,25 @@ class MarketService:
             window = await MarketService.get_market_window(window_id)
             if not window:
                 return {"success": False, "reason": "Market window not found"}
-            if window["status"] != "clause_window":
+            if window["status"] not in ("clause_window", "market_open"):
                 return {"success": False, "reason": "Clause window is closed"}
 
             league_id = window["league_id"]
-            league_rows = await db.execute_fetchall(
-                "SELECT max_clausulazos_per_window FROM leagues WHERE id=$1",
-                (league_id,),
-            )
-            max_clausulazos = league_rows[0]["max_clausulazos_per_window"] if league_rows else 2
 
-            submitted_count = await db.execute_fetchall(
-                "SELECT COUNT(*)::int as cnt FROM clause_attempts WHERE market_window_id=$1 AND buyer_team_id=$2",
-                (window_id, buyer_team_id),
-            )
-            if submitted_count and submitted_count[0]["cnt"] >= max_clausulazos:
-                return {"success": False, "reason": f"Max clausulazos reached ({max_clausulazos})"}
+            # Only enforce the clausulazo limit during the clause_window phase.
+            # During market_open any number of deferred bids can be submitted.
+            if window["status"] == "clause_window":
+                league_rows = await db.execute_fetchall(
+                    "SELECT max_clausulazos_per_window FROM leagues WHERE id=$1",
+                    (league_id,),
+                )
+                max_clausulazos = league_rows[0]["max_clausulazos_per_window"] if league_rows else 2
+                submitted_count = await db.execute_fetchall(
+                    "SELECT COUNT(*)::int as cnt FROM clause_attempts WHERE market_window_id=$1 AND buyer_team_id=$2",
+                    (window_id, buyer_team_id),
+                )
+                if submitted_count and submitted_count[0]["cnt"] >= max_clausulazos:
+                    return {"success": False, "reason": f"Max clausulazos reached ({max_clausulazos})"}
 
             owner = await db.execute_fetchall(
                 """SELECT tp.team_id, ft.team_name
