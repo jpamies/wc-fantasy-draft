@@ -658,20 +658,19 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'mar
             <div class="player-info">
                 <div class="player-name">${p.name}</div>
                 <div class="player-meta">${p.current_team_name} · ${p.country_code}</div>
-                <div style="font-size:.75rem;color:var(--text-secondary)">
-                    Cláusula: ${formatMoney(p.clause_amount)} ${p.is_blocked ? '🔒 BLOQUEADO' : ''}
-                </div>
             </div>
             <span class="badge badge-small">${p.position}</span>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.2rem">
-                <span class="stat-value" style="font-size:1rem">${formatMoney(p.market_value)}</span>
                 <span style="font-size:.75rem;color:var(--accent-teal);font-weight:600">⭐ ${p.total_points || 0} pts</span>
             </div>
-            <button class="btn btn-sm btn-primary" data-pid="${p.player_id}" data-amount="${p.clause_amount}"
-                ${disabled ? 'disabled' : ''} ${title ? `title="${title}"` : ''}
-                onclick="window.buyPlayer('${leagueId}', '${teamId}', '${windowId}', this, '${mode}')">
-                ${label}
-            </button>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.25rem">
+                <span style="font-size:.8rem;color:var(--text-secondary)">${p.is_blocked ? '🔒' : formatMoney(p.clause_amount)}</span>
+                <button class="btn btn-sm btn-primary" data-pid="${p.player_id}" data-amount="${p.clause_amount}"
+                    ${disabled ? 'disabled' : ''} ${title ? `title="${title}"` : ''}
+                    onclick="window.buyPlayer('${leagueId}', '${teamId}', '${windowId}', this, '${mode}')">
+                    ${label}
+                </button>
+            </div>
         </div>`;
     }).join('');
 }
