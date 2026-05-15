@@ -263,6 +263,34 @@ CREATE TABLE IF NOT EXISTS market_transactions (
     created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
 );
 
+CREATE TABLE IF NOT EXISTS clause_attempts (
+    id SERIAL PRIMARY KEY,
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    league_id TEXT NOT NULL REFERENCES leagues(id),
+    buyer_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    expected_seller_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+    player_id TEXT NOT NULL REFERENCES players(id),
+    clause_amount_snapshot INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','executed','failed')),
+    failure_reason TEXT,
+    market_transaction_id INTEGER REFERENCES market_transactions(id),
+    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    resolved_at TEXT,
+    UNIQUE(market_window_id, buyer_team_id, player_id)
+);
+
+CREATE TABLE IF NOT EXISTS news_events (
+    id SERIAL PRIMARY KEY,
+    league_id TEXT NOT NULL REFERENCES leagues(id),
+    event_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    related_window_id INTEGER REFERENCES market_windows(id),
+    related_team_id TEXT REFERENCES fantasy_teams(id),
+    related_player_id TEXT REFERENCES players(id),
+    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
 CREATE TABLE IF NOT EXISTS reposition_draft_picks (
     id SERIAL PRIMARY KEY,
     market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
@@ -280,8 +308,12 @@ CREATE INDEX IF NOT EXISTS idx_market_budgets_market ON market_budgets(market_wi
 CREATE INDEX IF NOT EXISTS idx_market_transactions_market ON market_transactions(market_window_id);
 CREATE INDEX IF NOT EXISTS idx_market_transactions_buyer ON market_transactions(buyer_team_id);
 CREATE INDEX IF NOT EXISTS idx_market_transactions_seller ON market_transactions(seller_team_id);
+CREATE INDEX IF NOT EXISTS idx_clause_attempts_window ON clause_attempts(market_window_id);
+CREATE INDEX IF NOT EXISTS idx_clause_attempts_buyer ON clause_attempts(buyer_team_id);
+CREATE INDEX IF NOT EXISTS idx_clause_attempts_status ON clause_attempts(status);
 CREATE INDEX IF NOT EXISTS idx_reposition_picks_market ON reposition_draft_picks(market_window_id);
 CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(team_id);
+CREATE INDEX IF NOT EXISTS idx_news_events_league ON news_events(league_id, created_at DESC);
 """
 
 

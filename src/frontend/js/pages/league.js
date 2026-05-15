@@ -2,6 +2,7 @@
 async function renderLeaguePage(container) {
     const leagueId = API.getLeagueId();
     const league = await API.get(`/leagues/${leagueId}`);
+    const news = await API.get(`/leagues/${leagueId}/news?limit=25`);
     const isComm = API.isCommissioner();
 
     localStorage.setItem('wcf_team_name', league.teams.find(t => t.id === API.getTeamId())?.team_name || '');
@@ -48,6 +49,20 @@ async function renderLeaguePage(container) {
                     `).join('')}
                 </tbody>
             </table>
+        </div>
+
+        <div class="card mb-2">
+            <div class="card-header">🗞️ Centro de Noticias</div>
+            <div style="max-height:320px;overflow-y:auto">
+                ${!news || news.length === 0 ? '<p style="color:var(--text-muted)">Sin noticias todavía</p>' : ''}
+                ${(news || []).map(n => `
+                    <div style="padding:.55rem 0;border-bottom:1px solid var(--border)">
+                        <div style="font-weight:600;font-size:.9rem">${n.title}</div>
+                        <div style="font-size:.8rem;color:var(--text-secondary)">${n.body || ''}</div>
+                        <div style="font-size:.72rem;color:var(--text-muted)">${formatMadrid(n.created_at)}</div>
+                    </div>
+                `).join('')}
+            </div>
         </div>
 
         ${isComm ? `

@@ -177,6 +177,86 @@ async def get_standings(league_id: str):
         await db.close()
 
 
+@router.get("/leagues/{league_id}/news")
+async def get_league_news(league_id: str, limit: int = 50, auth: dict = Depends(get_current_team)):
+    """Recent league news/events for transparency (market, clauses, scoring, etc.)."""
+    if auth.get("league_id") != league_id:
+        raise HTTPException(403, "Not in this league")
+    safe_limit = max(1, min(limit, 200))
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            """SELECT id, event_type, title, body, related_window_id, related_team_id, related_player_id, created_at
+               FROM news_events
+               WHERE league_id=$1
+               ORDER BY created_at DESC
+               LIMIT $2""",
+            (league_id, safe_limit),
+        )
+
+        draft_rows = await db.execute_fetchall(
+            """SELECT dp.timestamp as created_at,
+                      ft.id as related_team_id,
+                      p.id as related_player_id,
+                      ft.team_name,
+                      p.name as player_name,
+                      dp.round,
+                      dp.pick
+               FROM draft_picks dp
+               JOIN drafts d ON d.id = dp.draft_id
+               JOIN fantasy_teams ft ON ft.id = dp.team_id
+               JOIN players p ON p.id = dp.player_id
+               WHERE d.league_id=$1
+               ORDER BY dp.timestamp DESC
+               LIMIT 30""",
+            (league_id,),
+        )
+
+        completed_matchdays = await db.execute_fetchall(
+            """SELECT id, name, COALESCE(date, '') as created_at
+               FROM matchdays
+               WHERE status='completed'
+               ORDER BY id DESC
+               LIMIT 10"""
+        )
+
+        feed = [dict(r) for r in rows]
+        for d in draft_rows:
+            d = dict(d)
+            feed.append(
+                {
+                    "id": f"draft-{d['round']}-{d['pick']}-{d['related_player_id']}",
+                    "event_type": "draft_pick",
+                    "title": f"{d['team_name']} draftea a {d['player_name']}",
+                    "body": f"Ronda {d['round']} · Pick {d['pick']}",
+                    "related_window_id": None,
+                    "related_team_id": d["related_team_id"],
+                    "related_player_id": d["related_player_id"],
+                    "created_at": d["created_at"],
+                }
+            )
+
+        for md in completed_matchdays:
+            md = dict(md)
+            feed.append(
+                {
+                    "id": f"md-{md['id']}",
+                    "event_type": "matchday_scored",
+                    "title": f"Jornada completada: {md['name']}",
+                    "body": "Puntuaciones cerradas para esta jornada.",
+                    "related_window_id": None,
+                    "related_team_id": None,
+                    "related_player_id": None,
+                    "created_at": md["created_at"] or datetime.now(timezone.utc).isoformat(),
+                }
+            )
+
+        feed.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        return feed[:safe_limit]
+    finally:
+        await db.close()
+
+
 @router.get("/leagues/{league_id}/team-lineup/{team_id}/{matchday_id}")
 async def get_team_lineup_public(league_id: str, team_id: str, matchday_id: str):
     """Read-only view of a team's lineup for a matchday (for standings detail)."""
@@ -362,10 +442,12 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         for mw in market_win_rows:
             mw_id = mw["id"]
             await db.execute("DELETE FROM reposition_draft_picks WHERE market_window_id=$1", (mw_id,))
+            await db.execute("DELETE FROM clause_attempts WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM market_transactions WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM market_budgets WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM player_clauses WHERE market_window_id=$1", (mw_id,))
         await db.execute("DELETE FROM market_windows WHERE league_id=$1", (league_id,))
+        await db.execute("DELETE FROM news_events WHERE league_id=$1", (league_id,))
 
         # Delete transfers
         await db.execute("DELETE FROM transfers WHERE league_id=$1", (league_id,))
@@ -479,10 +561,12 @@ async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_te
         for mw in market_win_rows:
             mw_id = mw["id"]
             await db.execute("DELETE FROM reposition_draft_picks WHERE market_window_id=$1", (mw_id,))
+            await db.execute("DELETE FROM clause_attempts WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM market_transactions WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM market_budgets WHERE market_window_id=$1", (mw_id,))
             await db.execute("DELETE FROM player_clauses WHERE market_window_id=$1", (mw_id,))
         await db.execute("DELETE FROM market_windows WHERE league_id=$1", (league_id,))
+        await db.execute("DELETE FROM news_events WHERE league_id=$1", (league_id,))
 
         # 3. Clear all team players and lineups for this league
         await db.execute(

@@ -570,6 +570,20 @@ async def buy_player(
         raise HTTPException(403, "Can only buy for own team")
 
     try:
+        window = await MarketService.get_market_window(window_id)
+        if not window:
+            raise HTTPException(404, "Market window not found")
+
+        if window["status"] == "clause_window":
+            result = await MarketService.submit_clause_attempt(
+                window_id=window_id,
+                buyer_team_id=team_id,
+                player_id=body.player_id,
+            )
+            if not result.get("success"):
+                raise HTTPException(400, result.get("reason", "Clausulazo no válido"))
+            return result
+
         result = await MarketService.buy_player(
             window_id=window_id,
             buyer_team_id=team_id,
@@ -582,6 +596,38 @@ async def buy_player(
         raise
     except Exception as e:
         logger.error(f"Error buying player: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/teams/{team_id}/market/{window_id}/clause-attempts")
+async def get_clause_attempts(
+    team_id: str,
+    window_id: int,
+    current_team: dict = Depends(get_current_team),
+):
+    """Get deferred clause attempts sent by current team."""
+    if current_team["team_id"] != team_id:
+        raise HTTPException(403, "Can only view own clause attempts")
+    try:
+        return await MarketService.get_clause_attempts(window_id, team_id)
+    except Exception as e:
+        logger.error(f"Error getting clause attempts: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/leagues/{league_id}/market/{window_id}/clause-log")
+async def get_clause_log(
+    league_id: str,
+    window_id: int,
+    current_team: dict = Depends(get_current_team),
+):
+    """Get full clause resolution log for transparency."""
+    if current_team.get("league_id") != league_id:
+        raise HTTPException(403, "Cannot view another league")
+    try:
+        return await MarketService.get_clause_log(window_id, league_id)
+    except Exception as e:
+        logger.error(f"Error getting clause log: {e}")
         raise HTTPException(500, str(e))
 
 

@@ -1,5 +1,6 @@
 """Market service — handle market windows, clauses, transactions, and reposition draft."""
 import logging
+import random
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -45,6 +46,243 @@ async def get_alive_country_codes() -> Optional[set]:
 
 class MarketService:
     """Service for managing market windows and related operations."""
+
+    @staticmethod
+    async def _record_news_event(
+        db,
+        league_id: str,
+        event_type: str,
+        title: str,
+        body: str = "",
+        related_window_id: Optional[int] = None,
+        related_team_id: Optional[str] = None,
+        related_player_id: Optional[str] = None,
+    ) -> None:
+        await db.execute(
+            """INSERT INTO news_events
+               (league_id, event_type, title, body, related_window_id, related_team_id, related_player_id, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+            (
+                league_id,
+                event_type,
+                title,
+                body,
+                related_window_id,
+                related_team_id,
+                related_player_id,
+                datetime.now().isoformat(),
+            ),
+        )
+
+    @staticmethod
+    async def _execute_marked_releases(db, window_id: int, league_id: str) -> int:
+        """Release SELL players (clause=0 and not blocked) after market phase closes."""
+        sell_rows = await db.execute_fetchall(
+            """SELECT pc.team_id, pc.player_id, p.name as player_name, ft.team_name
+               FROM player_clauses pc
+               JOIN fantasy_teams ft ON pc.team_id = ft.id
+               JOIN players p ON pc.player_id = p.id
+               WHERE pc.market_window_id=$1 AND ft.league_id=$2
+                 AND pc.clause_amount = 0 AND pc.is_blocked = 0""",
+            (window_id, league_id),
+        )
+
+        from src.backend.services.lineup_service import ensure_matchday_snapshot
+        started_mds = await db.execute_fetchall(
+            "SELECT id FROM matchdays WHERE status IN ('active','completed')"
+        )
+        league_team_rows = await db.execute_fetchall(
+            "SELECT id FROM fantasy_teams WHERE league_id=$1", (league_id,)
+        )
+        for md_row in started_mds:
+            for t_row in league_team_rows:
+                try:
+                    await ensure_matchday_snapshot(t_row["id"], md_row["id"])
+                except Exception as e:
+                    logger.warning(
+                        f"Snapshot failed for team {t_row['id']} md {md_row['id']}: {e}"
+                    )
+
+        released = 0
+        for row in sell_rows:
+            team_id = row["team_id"]
+            player_id = row["player_id"]
+            await db.execute(
+                "DELETE FROM team_players WHERE team_id=$1 AND player_id=$2",
+                (team_id, player_id),
+            )
+            await db.execute(
+                """DELETE FROM matchday_lineups
+                   WHERE team_id=$1 AND player_id=$2
+                     AND matchday_id IN (
+                         SELECT id FROM matchdays WHERE status NOT IN ('active','completed')
+                     )""",
+                (team_id, player_id),
+            )
+            await MarketService._record_news_event(
+                db,
+                league_id=league_id,
+                event_type="release",
+                title=f"{row['team_name']} libera a {row['player_name']}",
+                body="Jugador liberado al cerrar la fase de mercado.",
+                related_window_id=window_id,
+                related_team_id=team_id,
+                related_player_id=player_id,
+            )
+            released += 1
+
+        return released
+
+    @staticmethod
+    async def _resolve_clause_attempts(db, window_id: int, league_id: str, max_per_team: int) -> Dict[str, int]:
+        """Resolve pending clause attempts with random order and per-team caps."""
+        pending = await db.execute_fetchall(
+            """SELECT ca.id, ca.buyer_team_id, ca.expected_seller_team_id, ca.player_id,
+                      ca.clause_amount_snapshot,
+                      bt.team_name as buyer_team_name,
+                      st.team_name as seller_team_name,
+                      p.name as player_name
+               FROM clause_attempts ca
+               JOIN fantasy_teams bt ON bt.id = ca.buyer_team_id
+               JOIN fantasy_teams st ON st.id = ca.expected_seller_team_id
+               JOIN players p ON p.id = ca.player_id
+               WHERE ca.market_window_id=$1 AND ca.league_id=$2 AND ca.status='pending'""",
+            (window_id, league_id),
+        )
+
+        attempts = [dict(r) for r in pending]
+        random.shuffle(attempts)
+
+        buyer_done: dict[str, int] = {}
+        seller_done: dict[str, int] = {}
+        executed = 0
+        failed = 0
+
+        for a in attempts:
+            attempt_id = a["id"]
+            buyer_team_id = a["buyer_team_id"]
+            expected_seller = a["expected_seller_team_id"]
+            player_id = a["player_id"]
+            failure_reason = None
+
+            if buyer_done.get(buyer_team_id, 0) >= max_per_team:
+                failure_reason = "buyer_limit_reached"
+
+            owner_row = await db.execute_fetchall(
+                """SELECT tp.team_id
+                   FROM team_players tp
+                   JOIN fantasy_teams ft ON ft.id = tp.team_id
+                   WHERE tp.player_id=$1 AND ft.league_id=$2""",
+                (player_id, league_id),
+            )
+
+            if not failure_reason and not owner_row:
+                failure_reason = "player_not_owned"
+
+            current_seller = owner_row[0]["team_id"] if owner_row else None
+
+            if not failure_reason and current_seller == buyer_team_id:
+                failure_reason = "already_owned"
+            if not failure_reason and current_seller != expected_seller:
+                failure_reason = "player_already_taken"
+            if not failure_reason and seller_done.get(current_seller, 0) >= max_per_team:
+                failure_reason = "seller_limit_reached"
+
+            clause_row = await db.execute_fetchall(
+                """SELECT clause_amount, is_blocked
+                   FROM player_clauses
+                   WHERE market_window_id=$1 AND team_id=$2 AND player_id=$3""",
+                (window_id, current_seller, player_id),
+            ) if not failure_reason else []
+
+            if not failure_reason:
+                if clause_row and clause_row[0]["is_blocked"]:
+                    failure_reason = "blocked"
+                else:
+                    clause_amount = clause_row[0]["clause_amount"] if clause_row else a["clause_amount_snapshot"]
+                    if clause_amount <= 0:
+                        failure_reason = "invalid_clause"
+
+            buyer_budget = await db.execute_fetchall(
+                "SELECT remaining_budget FROM market_budgets WHERE market_window_id=$1 AND team_id=$2",
+                (window_id, buyer_team_id),
+            ) if not failure_reason else []
+
+            if not failure_reason and (not buyer_budget or buyer_budget[0]["remaining_budget"] < clause_amount):
+                failure_reason = "insufficient_budget"
+
+            if failure_reason:
+                await db.execute(
+                    "UPDATE clause_attempts SET status='failed', failure_reason=$1, resolved_at=$2 WHERE id=$3",
+                    (failure_reason, datetime.now().isoformat(), attempt_id),
+                )
+                await MarketService._record_news_event(
+                    db,
+                    league_id=league_id,
+                    event_type="clause_failed",
+                    title=f"Clausulazo fallido: {a['buyer_team_name']} por {a['player_name']}",
+                    body=f"Resultado: {failure_reason}",
+                    related_window_id=window_id,
+                    related_team_id=buyer_team_id,
+                    related_player_id=player_id,
+                )
+                failed += 1
+                continue
+
+            await db.execute(
+                "UPDATE team_players SET team_id=$1, acquired_via='clause', acquired_at=$2 WHERE player_id=$3 AND team_id=$4",
+                (buyer_team_id, datetime.now().isoformat(), player_id, current_seller),
+            )
+
+            await db.execute(
+                """UPDATE market_budgets
+                   SET spent_on_buys = spent_on_buys + $1,
+                       remaining_budget = remaining_budget - $2,
+                       buys_count = buys_count + 1,
+                       updated_at = $3
+                   WHERE market_window_id = $4 AND team_id = $5""",
+                (clause_amount, clause_amount, datetime.now().isoformat(), window_id, buyer_team_id),
+            )
+            await db.execute(
+                """UPDATE market_budgets
+                   SET earned_from_sales = earned_from_sales + $1,
+                       remaining_budget = remaining_budget + $2,
+                       sells_count = sells_count + 1,
+                       updated_at = $3
+                   WHERE market_window_id = $4 AND team_id = $5""",
+                (clause_amount, clause_amount, datetime.now().isoformat(), window_id, current_seller),
+            )
+
+            tx = await db.execute_fetchall(
+                """INSERT INTO market_transactions
+                   (market_window_id, buyer_team_id, seller_team_id, player_id, clause_amount_paid, status)
+                   VALUES ($1, $2, $3, $4, $5, 'completed')
+                   RETURNING id""",
+                (window_id, buyer_team_id, current_seller, player_id, clause_amount),
+            )
+            tx_id = tx[0]["id"]
+
+            await db.execute(
+                "UPDATE clause_attempts SET status='executed', market_transaction_id=$1, resolved_at=$2 WHERE id=$3",
+                (tx_id, datetime.now().isoformat(), attempt_id),
+            )
+
+            buyer_done[buyer_team_id] = buyer_done.get(buyer_team_id, 0) + 1
+            seller_done[current_seller] = seller_done.get(current_seller, 0) + 1
+            executed += 1
+
+            await MarketService._record_news_event(
+                db,
+                league_id=league_id,
+                event_type="clause_executed",
+                title=f"Clausulazo ejecutado: {a['buyer_team_name']} ficha a {a['player_name']}",
+                body=f"Importe: {clause_amount}",
+                related_window_id=window_id,
+                related_team_id=buyer_team_id,
+                related_player_id=player_id,
+            )
+
+        return {"executed": executed, "failed": failed}
 
     # ==================== MARKET WINDOWS ====================
 
@@ -271,10 +509,8 @@ class MarketService:
     async def start_market_phase(window_id: int) -> Dict[str, Any]:
         """Transition to market_open phase and initialize budgets for all teams.
 
-        Side effect: any player with clause_amount=0 and is_blocked=False has
-        been flagged for release (SELL). Those players leave their team
-        (deleted from team_players + matchday_lineups for upcoming matchdays)
-        and become free agents, freeing squad slots.
+        Also resolves pending clause attempts in random order with per-team
+        limits from league settings.
         """
         db = await get_db()
         try:
@@ -286,60 +522,6 @@ class MarketService:
                 "UPDATE market_windows SET status='market_open', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
-
-            # Release SELL players (clause=0 and not blocked) from their teams.
-            sell_rows = await db.execute_fetchall(
-                """SELECT pc.team_id, pc.player_id
-                   FROM player_clauses pc
-                   JOIN fantasy_teams ft ON pc.team_id = ft.id
-                   WHERE pc.market_window_id=$1 AND ft.league_id=$2
-                     AND pc.clause_amount = 0 AND pc.is_blocked = 0""",
-                (window_id, league_id),
-            )
-
-            # Before mutating team_players, ensure snapshots exist for every
-            # already-started matchday so historical lineups survive the sale.
-            from src.backend.services.lineup_service import ensure_matchday_snapshot
-            started_mds = await db.execute_fetchall(
-                "SELECT id FROM matchdays WHERE status IN ('active','completed')"
-            )
-            league_team_rows = await db.execute_fetchall(
-                "SELECT id FROM fantasy_teams WHERE league_id=$1", (league_id,)
-            )
-            for md_row in started_mds:
-                for t_row in league_team_rows:
-                    try:
-                        await ensure_matchday_snapshot(t_row["id"], md_row["id"])
-                    except Exception as e:
-                        logger.warning(
-                            f"Snapshot failed for team {t_row['id']} md {md_row['id']}: {e}"
-                        )
-
-            released = 0
-            for row in sell_rows:
-                team_id = row["team_id"]
-                player_id = row["player_id"]
-                # Remove from squad
-                await db.execute(
-                    "DELETE FROM team_players WHERE team_id=$1 AND player_id=$2",
-                    (team_id, player_id),
-                )
-                # Remove from FUTURE matchday lineups only — preserve history
-                # (snapshots of already-played matchdays must keep this player
-                # so points and lineup display remain accurate).
-                await db.execute(
-                    """DELETE FROM matchday_lineups
-                       WHERE team_id=$1 AND player_id=$2
-                         AND matchday_id IN (
-                             SELECT id FROM matchdays WHERE status NOT IN ('active','completed')
-                         )""",
-                    (team_id, player_id),
-                )
-                released += 1
-            if released:
-                logger.info(
-                    f"Released {released} SELL players (clause=0, not blocked) at market open for window {window_id}"
-                )
 
             # Initialize budgets for all teams in league
             # Carry over remaining_budget from the PREVIOUS market window
@@ -382,6 +564,27 @@ class MarketService:
                         (window_id, team_id, budget_amount, budget_amount),
                     )
 
+            league_cfg = await db.execute_fetchall(
+                "SELECT max_clausulazos_per_window FROM leagues WHERE id=$1",
+                (league_id,),
+            )
+            max_clausulazos = league_cfg[0]["max_clausulazos_per_window"] if league_cfg else 2
+            clause_result = await MarketService._resolve_clause_attempts(
+                db=db,
+                window_id=window_id,
+                league_id=league_id,
+                max_per_team=max_clausulazos,
+            )
+
+            await MarketService._record_news_event(
+                db,
+                league_id=league_id,
+                event_type="clause_resolution",
+                title=f"Resolución de clausulazos ({window.get('phase', 'mercado')})",
+                body=f"Ejecutados: {clause_result['executed']} · Fallidos: {clause_result['failed']}",
+                related_window_id=window_id,
+            )
+
             await db.commit()
             return await MarketService.get_market_window(window_id)
         except Exception as e:
@@ -395,10 +598,22 @@ class MarketService:
         """Close market window and prepare for reposition draft."""
         db = await get_db()
         try:
+            window = await MarketService.get_market_window(window_id)
+            league_id = window["league_id"]
+            released = await MarketService._execute_marked_releases(db, window_id, league_id)
             await db.execute(
                 "UPDATE market_windows SET status='market_closed', updated_at=$1 WHERE id=$2",
                 (datetime.now().isoformat(), window_id),
             )
+            if released:
+                await MarketService._record_news_event(
+                    db,
+                    league_id=league_id,
+                    event_type="release_summary",
+                    title="Liberaciones ejecutadas",
+                    body=f"Jugadores liberados: {released}",
+                    related_window_id=window_id,
+                )
             await db.commit()
             return await MarketService.get_market_window(window_id)
         except Exception as e:
@@ -551,6 +766,14 @@ class MarketService:
         """Execute player purchase transaction."""
         db = await get_db()
         try:
+            window = await MarketService.get_market_window(window_id)
+            if not window:
+                return {"success": False, "reason": "Market window not found"}
+            if window["status"] == "clause_window":
+                return await MarketService.submit_clause_attempt(window_id, buyer_team_id, player_id)
+            if window["status"] != "market_open":
+                return {"success": False, "reason": "Market is not open"}
+
             # Get player's current owner and clause
             owner_result = await db.execute_fetchall(
                 """SELECT tp.team_id
@@ -563,6 +786,12 @@ class MarketService:
                 return {"success": False, "reason": "Player not found"}
 
             seller_team_id = owner_result[0]["team_id"]
+
+            league_row = await db.execute_fetchall(
+                "SELECT league_id FROM fantasy_teams WHERE id=$1",
+                (buyer_team_id,),
+            )
+            league_id = league_row[0]["league_id"] if league_row else None
 
             if seller_team_id == buyer_team_id:
                 return {"success": False, "reason": "Cannot buy own player"}
@@ -587,7 +816,6 @@ class MarketService:
                 return {"success": False, "reason": "Insufficient budget"}
 
             # Check buyer hasn't exceeded max_buys
-            window = await MarketService.get_market_window(window_id)
             if buyer_budget["buys_count"] >= window["max_buys"]:
                 return {"success": False, "reason": f"Max purchases ({window['max_buys']}) reached"}
 
@@ -656,6 +884,21 @@ class MarketService:
                 )
                 tx_id = tx_row[0]["id"]
 
+                buyer_team_name = await db.execute_fetchall("SELECT team_name FROM fantasy_teams WHERE id=$1", (buyer_team_id,))
+                seller_team_name = await db.execute_fetchall("SELECT team_name FROM fantasy_teams WHERE id=$1", (seller_team_id,))
+                player_name = await db.execute_fetchall("SELECT name FROM players WHERE id=$1", (player_id,))
+                if league_id:
+                    await MarketService._record_news_event(
+                        db,
+                        league_id=league_id,
+                        event_type="market_transfer",
+                        title=f"{buyer_team_name[0]['team_name']} ficha a {player_name[0]['name']}",
+                        body=f"Desde {seller_team_name[0]['team_name']} por {clause_amount}",
+                        related_window_id=window_id,
+                        related_team_id=buyer_team_id,
+                        related_player_id=player_id,
+                    )
+
                 await db.commit()
             except Exception as tx_err:
                 await db.rollback()
@@ -666,6 +909,143 @@ class MarketService:
         except Exception as e:
             logger.error(f"Error buying player: {e}")
             raise
+        finally:
+            await db.close()
+
+    @staticmethod
+    async def submit_clause_attempt(
+        window_id: int,
+        buyer_team_id: str,
+        player_id: str,
+    ) -> Dict[str, Any]:
+        """Submit a deferred clause attempt during clause window."""
+        db = await get_db()
+        try:
+            window = await MarketService.get_market_window(window_id)
+            if not window:
+                return {"success": False, "reason": "Market window not found"}
+            if window["status"] != "clause_window":
+                return {"success": False, "reason": "Clause window is closed"}
+
+            league_id = window["league_id"]
+            league_rows = await db.execute_fetchall(
+                "SELECT max_clausulazos_per_window FROM leagues WHERE id=$1",
+                (league_id,),
+            )
+            max_clausulazos = league_rows[0]["max_clausulazos_per_window"] if league_rows else 2
+
+            submitted_count = await db.execute_fetchall(
+                "SELECT COUNT(*)::int as cnt FROM clause_attempts WHERE market_window_id=$1 AND buyer_team_id=$2",
+                (window_id, buyer_team_id),
+            )
+            if submitted_count and submitted_count[0]["cnt"] >= max_clausulazos:
+                return {"success": False, "reason": f"Max clausulazos reached ({max_clausulazos})"}
+
+            owner = await db.execute_fetchall(
+                """SELECT tp.team_id, ft.team_name
+                   FROM team_players tp
+                   JOIN fantasy_teams ft ON ft.id = tp.team_id
+                   WHERE tp.player_id=$1 AND ft.league_id=$2""",
+                (player_id, league_id),
+            )
+            if not owner:
+                return {"success": False, "reason": "Player not owned in this league"}
+
+            seller_team_id = owner[0]["team_id"]
+            if seller_team_id == buyer_team_id:
+                return {"success": False, "reason": "Cannot clause your own player"}
+
+            clause = await db.execute_fetchall(
+                """SELECT clause_amount, is_blocked
+                   FROM player_clauses
+                   WHERE market_window_id=$1 AND team_id=$2 AND player_id=$3""",
+                (window_id, seller_team_id, player_id),
+            )
+            clause_amount = clause[0]["clause_amount"] if clause else 0
+            is_blocked = clause[0]["is_blocked"] if clause else 0
+
+            if is_blocked:
+                return {"success": False, "reason": "Player is blocked"}
+            if clause_amount <= 0:
+                return {"success": False, "reason": "Player has no valid clause"}
+
+            try:
+                row = await db.execute_fetchall(
+                    """INSERT INTO clause_attempts
+                       (market_window_id, league_id, buyer_team_id, expected_seller_team_id, player_id, clause_amount_snapshot, status, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+                       RETURNING id""",
+                    (window_id, league_id, buyer_team_id, seller_team_id, player_id, clause_amount, datetime.now().isoformat()),
+                )
+            except Exception:
+                return {"success": False, "reason": "Attempt already submitted for this player"}
+
+            buyer_name = await db.execute_fetchall("SELECT team_name FROM fantasy_teams WHERE id=$1", (buyer_team_id,))
+            player_name = await db.execute_fetchall("SELECT name FROM players WHERE id=$1", (player_id,))
+            await MarketService._record_news_event(
+                db,
+                league_id=league_id,
+                event_type="clause_attempt",
+                title=f"{buyer_name[0]['team_name']} lanza clausulazo por {player_name[0]['name']}",
+                body=f"Importe marcado: {clause_amount}",
+                related_window_id=window_id,
+                related_team_id=buyer_team_id,
+                related_player_id=player_id,
+            )
+
+            await db.commit()
+            return {
+                "success": True,
+                "attempt_id": row[0]["id"],
+                "status": "pending",
+                "clause_amount": clause_amount,
+            }
+        except Exception as e:
+            logger.error(f"Error submitting clause attempt: {e}")
+            raise
+        finally:
+            await db.close()
+
+    @staticmethod
+    async def get_clause_attempts(window_id: int, team_id: str) -> List[Dict[str, Any]]:
+        db = await get_db()
+        try:
+            rows = await db.execute_fetchall(
+                """SELECT ca.id, ca.player_id, p.name as player_name,
+                          ca.expected_seller_team_id, st.team_name as seller_team_name,
+                          ca.clause_amount_snapshot, ca.status, ca.failure_reason,
+                          ca.created_at, ca.resolved_at
+                   FROM clause_attempts ca
+                   JOIN players p ON p.id = ca.player_id
+                   JOIN fantasy_teams st ON st.id = ca.expected_seller_team_id
+                   WHERE ca.market_window_id=$1 AND ca.buyer_team_id=$2
+                   ORDER BY ca.created_at DESC""",
+                (window_id, team_id),
+            )
+            return [dict(r) for r in rows]
+        finally:
+            await db.close()
+
+    @staticmethod
+    async def get_clause_log(window_id: int, league_id: str) -> List[Dict[str, Any]]:
+        db = await get_db()
+        try:
+            rows = await db.execute_fetchall(
+                """SELECT ca.id, ca.player_id, p.name as player_name,
+                          ca.buyer_team_id, bt.team_name as buyer_team_name,
+                          ca.expected_seller_team_id as seller_team_id,
+                          st.team_name as seller_team_name,
+                          ca.clause_amount_snapshot, ca.status, ca.failure_reason,
+                          ca.created_at, ca.resolved_at
+                   FROM clause_attempts ca
+                   JOIN players p ON p.id = ca.player_id
+                   JOIN fantasy_teams bt ON bt.id = ca.buyer_team_id
+                   JOIN fantasy_teams st ON st.id = ca.expected_seller_team_id
+                   WHERE ca.market_window_id=$1 AND ca.league_id=$2
+                   ORDER BY ca.created_at DESC""",
+                (window_id, league_id),
+            )
+            return [dict(r) for r in rows]
         finally:
             await db.close()
 

@@ -119,6 +119,8 @@ Router.register('#/market/:windowId', async (container, params) => {
         const budget = await API.get(`/teams/${teamId}/market/${windowId}/budget`);
         const clauses = await API.get(`/teams/${teamId}/market/${windowId}/clauses`);
         const transactions = await API.get(`/teams/${teamId}/market/${windowId}/transaction-history`);
+        const clauseAttempts = await API.get(`/teams/${teamId}/market/${windowId}/clause-attempts`);
+        const clauseLog = await API.get(`/leagues/${leagueId}/market/${windowId}/clause-log`);
         const team = await API.get(`/teams/${teamId}`);
 
         // Squad composition limits (mirror backend draft rules)
@@ -196,6 +198,36 @@ Router.register('#/market/:windowId', async (container, params) => {
                     <div id="clauses-form"></div>
                     <button class="btn btn-primary mt-1" id="btn-save-clauses">Guardar Cláusulas</button>
                 </div>
+
+                <div class="card mb-2">
+                    <div class="card-header">🎯 Clausulazos Pendientes (se sortean al cerrar fase)</div>
+                    <div class="form-group mb-1">
+                        <label>Filtrar por posición:</label>
+                        <select id="position-filter" style="width:100%">
+                            <option value="">Todos</option>
+                            <option value="GK">GK - Portero</option>
+                            <option value="DEF">DEF - Defensa</option>
+                            <option value="MID">MID - Centrocampista</option>
+                            <option value="FWD">FWD - Delantero</option>
+                        </select>
+                    </div>
+                    <div id="available-players" style="max-height:520px;overflow-y:auto"></div>
+                </div>
+
+                <div class="card mb-2">
+                    <div class="card-header">🧾 Mis Clausulazos</div>
+                    <div style="max-height:220px;overflow-y:auto">
+                        ${clauseAttempts.length === 0 ? '<p style="color:var(--text-muted)">Sin intentos enviados</p>' : ''}
+                        ${clauseAttempts.map(a => `
+                            <div style="padding:.5rem;border-bottom:1px solid var(--border);font-size:.85rem">
+                                <strong>${a.player_name}</strong> · ${a.seller_team_name}
+                                <div style="font-size:.75rem;color:var(--text-secondary)">
+                                    ${formatMoney(a.clause_amount_snapshot)} · <strong>${a.status}</strong>${a.failure_reason ? ` · ${a.failure_reason}` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
             `;
         }
 
@@ -246,6 +278,20 @@ Router.register('#/market/:windowId', async (container, params) => {
                     `).join('')}
                 </div>
             </div>
+            <div class="card mt-1">
+                <div class="card-header">🧩 Log de Clausulazos (Transparencia)</div>
+                <div style="max-height:280px;overflow-y:auto">
+                    ${clauseLog.length === 0 ? '<p style="color:var(--text-muted)">Sin clausulazos registrados en esta ventana</p>' : ''}
+                    ${clauseLog.map(r => `
+                        <div style="padding:.5rem;border-bottom:1px solid var(--border);font-size:.85rem">
+                            <strong>${r.player_name}</strong> · ${r.buyer_team_name} → ${r.seller_team_name}
+                            <div style="font-size:.75rem;color:var(--text-secondary)">
+                                ${formatMoney(r.clause_amount_snapshot)} · <strong>${r.status}</strong>${r.failure_reason ? ` · ${r.failure_reason}` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
         `;
 
         container.innerHTML = content;
@@ -253,11 +299,12 @@ Router.register('#/market/:windowId', async (container, params) => {
         // Load clause form
         if (win.status === 'clause_window') {
             await loadClauseForm(leagueId, teamId, windowId, clauses, win);
+            await loadAvailablePlayers(leagueId, teamId, windowId, 'clause_window');
         }
 
         // Load available players
         if (win.status === 'market_open') {
-            await loadAvailablePlayers(leagueId, teamId, windowId);
+            await loadAvailablePlayers(leagueId, teamId, windowId, 'market_open');
         }
 
     } catch (err) {
@@ -544,22 +591,22 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
     }
 }
 
-async function loadAvailablePlayers(leagueId, teamId, windowId) {
+async function loadAvailablePlayers(leagueId, teamId, windowId, mode = 'market_open') {
     try {
         document.getElementById('position-filter').addEventListener('change', async (e) => {
             const position = e.target.value;
             const players = await API.get(`/leagues/${leagueId}/market/${windowId}/available-players${position ? `?position=${position}` : ''}`);
-            renderAvailablePlayers(leagueId, teamId, windowId, players);
+            renderAvailablePlayers(leagueId, teamId, windowId, players, mode);
         });
 
         const players = await API.get(`/leagues/${leagueId}/market/${windowId}/available-players`);
-        renderAvailablePlayers(leagueId, teamId, windowId, players);
+        renderAvailablePlayers(leagueId, teamId, windowId, players, mode);
     } catch (err) {
         console.error(err);
     }
 }
 
-function renderAvailablePlayers(leagueId, teamId, windowId, players) {
+function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'market_open') {
     const container = document.getElementById('available-players');
     const counts = window._marketSquadCounts || { GK: 0, DEF: 0, MID: 0, FWD: 0 };
     const total = window._marketSquadTotal ?? 0;
@@ -571,7 +618,8 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players) {
         const squadFull = total >= SQUAD_MAX;
         const positionFull = (counts[p.position] || 0) >= (limits[p.position]?.max ?? 99);
         const blocked = !!p.is_blocked;
-        let label = 'Comprar';
+        const isClauseMode = mode === 'clause_window';
+        let label = isClauseMode ? 'Enviar clausulazo' : 'Comprar';
         let title = '';
         if (isOwn) { label = 'Tuyo'; }
         else if (blocked) { label = '🔒 Bloqueado'; title = 'El propietario lo ha bloqueado'; }
@@ -595,22 +643,25 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players) {
             </div>
             <button class="btn btn-sm btn-primary" data-pid="${p.player_id}" data-amount="${p.clause_amount}"
                 ${disabled ? 'disabled' : ''} ${title ? `title="${title}"` : ''}
-                onclick="window.buyPlayer('${leagueId}', '${teamId}', '${windowId}', this)">
+                onclick="window.buyPlayer('${leagueId}', '${teamId}', '${windowId}', this, '${mode}')">
                 ${label}
             </button>
         </div>`;
     }).join('');
 }
 
-window.buyPlayer = async function(leagueId, teamId, windowId, btn) {
+window.buyPlayer = async function(leagueId, teamId, windowId, btn, mode = 'market_open') {
     const playerId = btn.dataset.pid;
     const amount = parseInt(btn.dataset.amount);
 
-    if (!confirm(`¿Comprar este jugador por ${formatMoney(amount)}?`)) return;
+    const question = mode === 'clause_window'
+        ? `¿Enviar clausulazo por ${formatMoney(amount)}? Se resolverá al cerrar la fase.`
+        : `¿Comprar este jugador por ${formatMoney(amount)}?`;
+    if (!confirm(question)) return;
 
     try {
         await API.post(`/teams/${teamId}/market/${windowId}/buy-player`, { player_id: playerId });
-        showToast('¡Jugador comprado!', 'success');
+        showToast(mode === 'clause_window' ? 'Clausulazo enviado' : '¡Jugador comprado!', 'success');
         Router.handleRoute();
     } catch (err) {
         showToast(err.message, 'error');
