@@ -23,8 +23,17 @@ const Router = {
         return null;
     },
 
+    _guardDirty() {
+        if (window.__wcfClauseDirty) {
+            return confirm('Tienes cambios en las cláusulas sin guardar. ¿Salir de todas formas?');
+        }
+        return true;
+    },
+
     async navigate(hash) {
         if (!hash || hash === '#') hash = '#/';
+        if (!this._guardDirty()) return;
+        window.__wcfClauseDirty = false;
         window.location.hash = hash;
     },
 
@@ -61,7 +70,19 @@ const Router = {
     },
 
     init() {
-        window.addEventListener('hashchange', () => this.handleRoute());
+        window.addEventListener('hashchange', (e) => {
+            if (window.__wcfClauseDirty) {
+                // Restore previous hash and ask
+                const prev = e.oldURL.split('#')[1] || '/';
+                if (!this._guardDirty()) {
+                    // Revert navigation by restoring old hash without triggering another change
+                    history.replaceState(null, '', '#' + prev);
+                    return;
+                }
+                window.__wcfClauseDirty = false;
+            }
+            this.handleRoute();
+        });
         this.handleRoute();
     }
 };
