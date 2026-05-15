@@ -66,6 +66,13 @@ async def join_league(body: AuthJoin):
             raise HTTPException(404, "League not found")
         league = dict(row[0])
 
+        existing_any = await db.execute_fetchall(
+            "SELECT league_id FROM fantasy_teams WHERE owner_nick=$1 LIMIT 1",
+            (body.nickname,),
+        )
+        if existing_any and existing_any[0]["league_id"] != league["id"]:
+            raise HTTPException(409, "Este usuario ya pertenece a otra liga")
+
         # Check if nickname already taken in this league
         existing = await db.execute_fetchall(
             "SELECT id FROM fantasy_teams WHERE league_id=$1 AND owner_nick=$2",

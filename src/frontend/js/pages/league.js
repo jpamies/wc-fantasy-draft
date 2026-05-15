@@ -45,13 +45,12 @@ async function renderLeaguePage(container) {
         <div class="card mb-2">
             <div class="card-header">Equipos</div>
             <table>
-                <thead><tr><th>Equipo</th><th>Manager</th><th>Presupuesto</th></tr></thead>
+                <thead><tr><th>Equipo</th><th>Manager</th></tr></thead>
                 <tbody>
                     ${teams.map(t => `
                         <tr class="${t.id === API.getTeamId() ? 'rank-1' : ''}">
                             <td>${t.team_name} ${t.id === league.commissioner_team_id ? '👑' : ''} ${t.owner_nick?.startsWith('bot_') ? '🤖' : ''}</td>
                             <td>${t.display_name || t.owner_nick}</td>
-                            <td class="money">${formatMoney(t.budget)}</td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -133,9 +132,6 @@ async function renderLeaguePage(container) {
         </div>
         `}
 
-        <div style="text-align:center;margin-top:1rem">
-            <button class="btn btn-sm" id="btn-switch-league" style="opacity:.7">↩️ Cambiar de liga</button>
-        </div>
     `;
 
     document.getElementById('league-code')?.addEventListener('click', () => {
@@ -236,9 +232,4 @@ async function renderLeaguePage(container) {
         } catch (err) { showToast(err.message, 'error'); }
     });
 
-    document.getElementById('btn-switch-league')?.addEventListener('click', () => {
-        API.logout();
-        document.getElementById('main-nav').classList.add('hidden');
-        Router.navigate('#/');
-    });
 }
