@@ -2,7 +2,12 @@
 async function renderLeaguePage(container) {
     const leagueId = API.getLeagueId();
     const league = await API.get(`/leagues/${leagueId}`);
-    const news = await API.get(`/leagues/${leagueId}/news?limit=25`);
+    let news = [];
+    try {
+        news = await API.get(`/leagues/${leagueId}/news?limit=25`);
+    } catch (err) {
+        console.warn('League news could not be loaded:', err);
+    }
     const isComm = API.isCommissioner();
 
     localStorage.setItem('wcf_team_name', league.teams.find(t => t.id === API.getTeamId())?.team_name || '');
