@@ -1,7 +1,24 @@
 /* Home page — Clerk auth + create or join league */
 Router.register('#/', async (container) => {
     if (API.isLoggedIn()) {
-        await renderLeaguePage(container);
+        try {
+            await renderLeaguePage(container);
+        } catch (err) {
+            console.error('League page failed to render, falling back to join/create UI:', err);
+            const clerkUser = window.getClerkUser?.();
+            const nickname = clerkUser?.name || '';
+            const clerkId = clerkUser?.id || '';
+            API.logout();
+            if (clerkId) {
+                showCreateJoinForms(container, nickname, clerkId, '');
+            } else {
+                container.innerHTML = `
+                    <div class="card text-center mt-2">
+                        <p style="color:var(--text-secondary)">No se ha podido cargar la liga. Vuelve a iniciar sesión o crea una nueva.</p>
+                    </div>
+                `;
+            }
+        }
         return;
     }
 

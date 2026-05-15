@@ -9,10 +9,12 @@ async function renderLeaguePage(container) {
         console.warn('League news could not be loaded:', err);
     }
     const isComm = API.isCommissioner();
+    const teams = Array.isArray(league.teams) ? league.teams : [];
 
-    localStorage.setItem('wcf_team_name', league.teams.find(t => t.id === API.getTeamId())?.team_name || '');
+    localStorage.setItem('wcf_team_name', teams.find(t => t.id === API.getTeamId())?.team_name || '');
     const displayName = localStorage.getItem('wcf_display_name') || window.getClerkUser?.()?.name || '';
-    document.getElementById('nav-team-name').textContent = displayName || localStorage.getItem('wcf_team_name');
+    const navTeamName = document.getElementById('nav-team-name');
+    if (navTeamName) navTeamName.textContent = displayName || localStorage.getItem('wcf_team_name');
 
     const statusLabels = {
         setup: '⚙️ Configuración', draft_pending: '📋 Draft pendiente',
@@ -32,7 +34,7 @@ async function renderLeaguePage(container) {
             </div>
             <div class="card text-center">
                 <div style="font-size:.85rem;color:var(--text-secondary)">Equipos</div>
-                <div style="font-size:1.5rem;font-weight:700">${league.teams.length} / ${league.max_teams}</div>
+                <div style="font-size:1.5rem;font-weight:700">${teams.length} / ${league.max_teams}</div>
             </div>
             <div class="card text-center">
                 <div style="font-size:.85rem;color:var(--text-secondary)">Presupuesto inicial</div>
@@ -45,7 +47,7 @@ async function renderLeaguePage(container) {
             <table>
                 <thead><tr><th>Equipo</th><th>Manager</th><th>Presupuesto</th></tr></thead>
                 <tbody>
-                    ${league.teams.map(t => `
+                    ${teams.map(t => `
                         <tr class="${t.id === API.getTeamId() ? 'rank-1' : ''}">
                             <td>${t.team_name} ${t.id === league.commissioner_team_id ? '👑' : ''} ${t.owner_nick?.startsWith('bot_') ? '🤖' : ''}</td>
                             <td>${t.display_name || t.owner_nick}</td>
@@ -75,7 +77,7 @@ async function renderLeaguePage(container) {
             <div class="card-header">Panel del Comisionado</div>
             <div class="flex flex-wrap" style="gap:.5rem;align-items:center">
                 ${league.status === 'setup' || league.status === 'draft_pending' ? `
-                    <button class="btn btn-gold" id="btn-start-draft" ${league.teams.length < 2 ? 'disabled title="Mínimo 2 equipos"' : ''}>
+                    <button class="btn btn-gold" id="btn-start-draft" ${teams.length < 2 ? 'disabled title="Mínimo 2 equipos"' : ''}>
                         🎯 Iniciar Draft
                     </button>
                 ` : ''}
