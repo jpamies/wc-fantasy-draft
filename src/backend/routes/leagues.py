@@ -453,6 +453,15 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         market_win_rows = await db.execute_fetchall(
             "SELECT id FROM market_windows WHERE league_id=$1", (league_id,)
         )
+        # Borrar news_events ligados a ventanas de la liga antes de borrar market_windows
+        if await _table_exists(db, "news_events"):
+            mw_ids = [mw["id"] for mw in market_win_rows]
+            if mw_ids:
+                placeholders = ",".join(f"${{i+1}}" for i in range(len(mw_ids)))
+                await db.execute(
+                    f"DELETE FROM news_events WHERE related_window_id IN ({placeholders})",
+                    mw_ids,
+                )
         for mw in market_win_rows:
             mw_id = mw["id"]
             if await _table_exists(db, "reposition_draft_picks"):
@@ -575,6 +584,15 @@ async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_te
         market_win_rows = await db.execute_fetchall(
             "SELECT id FROM market_windows WHERE league_id=$1", (league_id,)
         )
+        # Borrar news_events ligados a ventanas de la liga antes de borrar market_windows
+        if await _table_exists(db, "news_events"):
+            mw_ids = [mw["id"] for mw in market_win_rows]
+            if mw_ids:
+                placeholders = ",".join(f"${{i+1}}" for i in range(len(mw_ids)))
+                await db.execute(
+                    f"DELETE FROM news_events WHERE related_window_id IN ({placeholders})",
+                    mw_ids,
+                )
         for mw in market_win_rows:
             mw_id = mw["id"]
             if await _table_exists(db, "reposition_draft_picks"):
