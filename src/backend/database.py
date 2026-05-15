@@ -422,6 +422,90 @@ async def init_db():
             )
             print("[DB] Migration: added countries.tournament_status")
 
+        has_clause_attempts = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'clause_attempts')"
+        )
+        if not has_clause_attempts:
+            await conn.execute(
+                """
+                CREATE TABLE clause_attempts (
+                    id SERIAL PRIMARY KEY,
+                    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+                    league_id TEXT NOT NULL REFERENCES leagues(id),
+                    buyer_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+                    expected_seller_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+                    player_id TEXT NOT NULL REFERENCES players(id),
+                    clause_amount_snapshot INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','executed','failed')),
+                    failure_reason TEXT,
+                    market_transaction_id INTEGER REFERENCES market_transactions(id),
+                    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
+                    resolved_at TEXT,
+                    UNIQUE(market_window_id, buyer_team_id, player_id)
+                )
+                """
+            )
+            print("[DB] Migration: created clause_attempts")
+
+        has_news_events = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'news_events')"
+        )
+        if not has_news_events:
+            await conn.execute(
+                """
+                CREATE TABLE news_events (
+                    id SERIAL PRIMARY KEY,
+                    league_id TEXT NOT NULL REFERENCES leagues(id),
+                    event_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT,
+                    related_window_id INTEGER REFERENCES market_windows(id),
+                    related_team_id TEXT REFERENCES fantasy_teams(id),
+                    related_player_id TEXT REFERENCES players(id),
+                    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
+                )
+                """
+            )
+            print("[DB] Migration: created news_events")
+
+        has_reposition_picks = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'reposition_draft_picks')"
+        )
+        if not has_reposition_picks:
+            await conn.execute(
+                """
+                CREATE TABLE reposition_draft_picks (
+                    id SERIAL PRIMARY KEY,
+                    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+                    team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
+                    pick_number INTEGER NOT NULL,
+                    player_id TEXT REFERENCES players(id),
+                    is_pass INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
+                )
+                """
+            )
+            print("[DB] Migration: created reposition_draft_picks")
+
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_clause_attempts_window ON clause_attempts(market_window_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_clause_attempts_buyer ON clause_attempts(buyer_team_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_clause_attempts_status ON clause_attempts(status)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_news_events_league ON news_events(league_id, created_at DESC)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reposition_picks_market ON reposition_draft_picks(market_window_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(team_id)"
+        )
+
 
 async def close_pool():
     global _pool
