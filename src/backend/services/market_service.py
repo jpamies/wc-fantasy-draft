@@ -637,16 +637,20 @@ class MarketService:
         """
         db = await get_db()
         try:
+            # De-duplicate by player so repeated submissions or duplicated UI
+            # rows do not violate the unique window/team/player constraint.
+            unique_clauses = list({c["player_id"]: c for c in clauses}.values())
+
             # Normalize: blocked players ignore any clause_amount (set to 0).
-            for c in clauses:
+            for c in unique_clauses:
                 if c.get("is_blocked"):
                     c["clause_amount"] = 0
 
             # Validate clause count and total budget. Blocked players are
             # excluded from the protect_budget computation.
-            blocked_count = sum(1 for c in clauses if c.get("is_blocked"))
+            blocked_count = sum(1 for c in unique_clauses if c.get("is_blocked"))
             total_budget = sum(
-                c.get("clause_amount", 0) for c in clauses if not c.get("is_blocked")
+                c.get("clause_amount", 0) for c in unique_clauses if not c.get("is_blocked")
             )
 
             window = await MarketService.get_market_window(window_id)
@@ -662,11 +666,15 @@ class MarketService:
             )
 
             # Insert new clauses
-            for clause in clauses:
+            for clause in unique_clauses:
                 await db.execute(
                     """INSERT INTO player_clauses 
                        (market_window_id, team_id, player_id, clause_amount, is_blocked, created_at, updated_at)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+                       VALUES ($1, $2, $3, $4, $5, $6, $7)
+                       ON CONFLICT (market_window_id, team_id, player_id)
+                       DO UPDATE SET clause_amount=EXCLUDED.clause_amount,
+                                     is_blocked=EXCLUDED.is_blocked,
+                                     updated_at=EXCLUDED.updated_at""",
                     (
                         window_id, team_id, clause["player_id"],
                         clause.get("clause_amount", 0), int(clause.get("is_blocked", False)),

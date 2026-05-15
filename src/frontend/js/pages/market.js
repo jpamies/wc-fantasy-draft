@@ -1,5 +1,16 @@
 /* Market page — market windows, clause protection, transactions, reposition draft */
 
+if (!window.__wcfClauseBeforeUnloadBound) {
+    window.__wcfClauseDirty = false;
+    window.addEventListener('beforeunload', (e) => {
+        if (!window.__wcfClauseDirty) return;
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+    });
+    window.__wcfClauseBeforeUnloadBound = true;
+}
+
 // List view: #/market
 Router.register('#/market', async (container) => {
     const leagueId = API.getLeagueId();
@@ -364,6 +375,9 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
         const team = await API.get(`/teams/${teamId}`);
         const protectBudget = win.protect_budget;
         const MAX_BLOCKED = 2;
+        const initialState = new Map((clauses || []).map(c => [c.player_id, `${c.clause_amount || 0}:${c.is_blocked ? 1 : 0}`]));
+
+        window.__wcfClauseDirty = false;
 
         // Group players by position. Order: GK, DEF, MID, FWD.
         const POSITION_ORDER = [
@@ -511,6 +525,13 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
                 if (!cb.checked) cb.disabled = limitReached;
                 else cb.disabled = false;
             });
+
+            const currentState = new Map();
+            document.querySelectorAll('.clause-card').forEach(card => {
+                currentState.set(card.dataset.pid, `${parseInt(card.dataset.amount || '0', 10)}:${card.dataset.blocked === '1' ? 1 : 0}`);
+            });
+            window.__wcfClauseDirty = Array.from(currentState.entries()).some(([pid, value]) => initialState.get(pid) !== value)
+                || Array.from(initialState.keys()).some(pid => !currentState.has(pid));
         };
 
         // Preset button click → set amount, update card, refresh visuals
@@ -567,6 +588,8 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
 
         // Save button
         document.getElementById('btn-save-clauses').addEventListener('click', async () => {
+            const saveBtn = document.getElementById('btn-save-clauses');
+            if (saveBtn) saveBtn.disabled = true;
             const newClauses = team.players.map(p => {
                 const card = form.querySelector(`.clause-card[data-pid="${p.player_id}"]`);
                 return {
@@ -574,16 +597,19 @@ async function loadClauseForm(leagueId, teamId, windowId, clauses, win) {
                     clause_amount: parseInt(card?.dataset.amount || '0', 10),
                     is_blocked: card?.dataset.blocked === '1',
                 };
-            });
+            }).filter((clause, index, list) => list.findIndex(item => item.player_id === clause.player_id) === index);
 
             try {
                 await API.post(`/teams/${teamId}/market/${windowId}/clauses/set`, { clauses: newClauses });
                 showToast('Cláusulas guardadas', 'success');
+                window.__wcfClauseDirty = false;
                 // Reload to reflect any normalization (blocked → amount=0)
                 const fresh = await API.get(`/teams/${teamId}/market/${windowId}/clauses`);
                 await loadClauseForm(leagueId, teamId, windowId, fresh, win);
             } catch (err) {
                 showToast(err.message, 'error');
+            } finally {
+                if (saveBtn) saveBtn.disabled = false;
             }
         });
     } catch (err) {
