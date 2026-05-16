@@ -991,20 +991,26 @@ class MarketService:
 
             league_id = window["league_id"]
 
-            # Only enforce the clausulazo limit during the clause_window phase.
-            # During market_open any number of deferred bids can be submitted.
-            if window["status"] == "clause_window":
-                league_rows = await db.execute_fetchall(
-                    "SELECT max_clausulazos_per_window FROM leagues WHERE id=$1",
-                    (league_id,),
-                )
-                max_clausulazos = league_rows[0]["max_clausulazos_per_window"] if league_rows else 2
-                submitted_count = await db.execute_fetchall(
-                    "SELECT COUNT(*)::int as cnt FROM clause_attempts WHERE market_window_id=$1 AND buyer_team_id=$2",
-                    (window_id, buyer_team_id),
-                )
-                if submitted_count and submitted_count[0]["cnt"] >= max_clausulazos:
-                    return {"success": False, "reason": f"Max clausulazos reached ({max_clausulazos})"}
+            # Enforce clausulazo limit in both clause_window and market_open
+            league_rows = await db.execute_fetchall(
+                "SELECT max_clausulazos_per_window FROM leagues WHERE id=$1",
+                (league_id,),
+            )
+            max_clausulazos = league_rows[0]["max_clausulazos_per_window"] if league_rows else 2
+            submitted_count = await db.execute_fetchall(
+                "SELECT COUNT(*)::int as cnt FROM clause_attempts WHERE market_window_id=$1 AND buyer_team_id=$2",
+                (window_id, buyer_team_id),
+            )
+            if submitted_count and submitted_count[0]["cnt"] >= max_clausulazos:
+                return {"success": False, "reason": f"Max clausulazos reached ({max_clausulazos})"}
+
+            # Check buyer squad size (cannot bid if already full).
+            squad_rows = await db.execute_fetchall(
+                "SELECT COUNT(*)::int as cnt FROM team_players WHERE team_id=$1",
+                (buyer_team_id,),
+            )
+            if squad_rows and squad_rows[0]["cnt"] >= 23:
+                return {"success": False, "reason": "Squad full (23 players)"}
 
             owner = await db.execute_fetchall(
                 """SELECT tp.team_id, ft.team_name
@@ -1033,6 +1039,22 @@ class MarketService:
                 return {"success": False, "reason": "Player is blocked"}
             if clause_amount <= 0:
                 return {"success": False, "reason": "Player has no valid clause"}
+
+            # Enforce budget: amount of all pending attempts + this one must fit.
+            budget_row = await db.execute_fetchall(
+                "SELECT remaining_budget FROM market_budgets WHERE market_window_id=$1 AND team_id=$2",
+                (window_id, buyer_team_id),
+            )
+            remaining_budget = budget_row[0]["remaining_budget"] if budget_row else 0
+            pending_row = await db.execute_fetchall(
+                """SELECT COALESCE(SUM(clause_amount_snapshot),0)::int as total
+                   FROM clause_attempts
+                   WHERE market_window_id=$1 AND buyer_team_id=$2 AND status='pending'""",
+                (window_id, buyer_team_id),
+            )
+            pending_amount = pending_row[0]["total"] if pending_row else 0
+            if clause_amount + pending_amount > remaining_budget:
+                return {"success": False, "reason": "Insufficient budget for this clause attempt"}
 
             try:
                 row = await db.execute_fetchall(
@@ -1156,7 +1178,8 @@ class MarketService:
                    ORDER BY mb.remaining_budget DESC""",
                 (window_id,),
             )
-            return [dict(o) for o in order]
+            # Teams already at 23 do not participate in reposition draft.
+            return [dict(o) for o in order if (o.get("players_count") or 0) < 23]
         except Exception as e:
             logger.error(f"Error calculating reposition draft order: {e}")
             raise
@@ -1380,6 +1403,19 @@ class MarketService:
                 return {"success": False, "reason": "Not your turn"}
 
             pick_number = current_turn[0]["pick_number"]
+
+            # Hard-stop full squads from picking (defense in depth).
+            count_row = await db.execute_fetchall(
+                "SELECT COUNT(*)::int as cnt FROM team_players WHERE team_id=$1",
+                (team_id,),
+            )
+            if count_row and count_row[0]["cnt"] >= 23:
+                await db.execute(
+                    "UPDATE reposition_draft_picks SET is_pass=1 WHERE market_window_id=$1 AND team_id=$2 AND pick_number=$3",
+                    (window_id, team_id, pick_number),
+                )
+                await db.commit()
+                return {"success": False, "reason": "Squad full (23 players)"}
 
             if player_id:
                 # Ensure full player data is in local DB (the row may be a stub

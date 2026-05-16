@@ -19,6 +19,14 @@ Router.register('#/market', async (container) => {
 
     try {
         const windows = await API.get(`/leagues/${leagueId}/market-windows`);
+        // Si hay una ventana market_open, redirige directamente a su vista de mercado
+        const openMarket = (windows || []).find(w => w.status === 'market_open');
+        if (openMarket) {
+            Router.navigate(`#/market/${openMarket.id}`);
+            return;
+        }
+
+        // ...existing code para mostrar cláusulas y lista de ventanas...
 
         const adminLink = currentTeam?.is_commissioner
             ? `<a href="#/admin/market" class="btn btn-primary">⚙️ Gestionar Mercados</a>` : '';
@@ -145,6 +153,10 @@ Router.register('#/market/:windowId', async (container, params) => {
         window._marketSquadTotal = total;
         window._marketSquadLimits = SQUAD_LIMITS;
         window._marketSquadMax = SQUAD_MAX;
+        // Expose clause attempts and budget for offer validation
+        window._marketClauseAttempts = clauseAttempts || [];
+        window._marketClauseMax = win.max_clausulazos_per_window || 3;
+        window._marketBudget = budget || { remaining_budget: 0 };
 
         const positionPill = (pos) => {
             const c = counts[pos];
@@ -295,7 +307,7 @@ Router.register('#/market/:windowId', async (container, params) => {
                     ${clauseLog.length === 0 ? '<p style="color:var(--text-muted)">Sin clausulazos registrados en esta ventana</p>' : ''}
                     ${clauseLog.map(r => `
                         <div style="padding:.5rem;border-bottom:1px solid var(--border);font-size:.85rem">
-                            <strong>${r.player_name}</strong> · ${r.buyer_team_name} → ${r.seller_team_name}
+                            <strong>${r.player_name}</strong> · ${r.seller_team_name} → ${r.buyer_team_name}
                             <div style="font-size:.75rem;color:var(--text-secondary)">
                                 ${formatMoney(r.clause_amount_snapshot)} · <strong>${r.status}</strong>${r.failure_reason ? ` · ${r.failure_reason}` : ''}
                             </div>
@@ -638,6 +650,11 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'mar
     const total = window._marketSquadTotal ?? 0;
     const limits = window._marketSquadLimits || { GK: { max: 3 }, DEF: { max: 8 }, MID: { max: 8 }, FWD: { max: 8 } };
     const SQUAD_MAX = window._marketSquadMax ?? 23;
+    const clauseAttempts = window._marketClauseAttempts || [];
+    const maxClausulazos = window._marketClauseMax || 3;
+    const remainingBudget = (window._marketBudget && window._marketBudget.remaining_budget) || 0;
+    const pendingAttempts = clauseAttempts.filter(a => a.status === 'pending');
+    const pendingAmount = pendingAttempts.reduce((acc, a) => acc + (a.clause_amount_snapshot || 0), 0);
 
     container.innerHTML = players.map(p => {
         const isOwn = p.current_team_id === teamId;
@@ -648,11 +665,23 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'mar
         const isMarketOpen = mode === 'market_open';
         let label = isClauseMode ? 'Enviar clausulazo' : (isMarketOpen ? 'Ofertar' : 'Comprar');
         let title = '';
+        // Clausulazo/Oferta: comprobar presupuesto y límite de intentos
+        let maxReached = false;
+        let insufficientBudget = false;
+        let invalidClause = false;
+        if (isClauseMode || isMarketOpen) {
+            maxReached = pendingAttempts.length >= maxClausulazos;
+            insufficientBudget = (p.clause_amount + pendingAmount) > remainingBudget;
+            invalidClause = !p.clause_amount || p.clause_amount <= 0;
+        }
         if (isOwn) { label = 'Tuyo'; }
         else if (blocked) { label = '🔒 Bloqueado'; title = 'El propietario lo ha bloqueado'; }
         else if (squadFull) { label = '🚫 Plantilla llena'; title = `Tienes ${total}/${SQUAD_MAX}`; }
         else if (positionFull) { label = `🚫 ${p.position} al máximo`; title = `${counts[p.position]}/${limits[p.position].max} en ${p.position}`; }
-        const disabled = isOwn || blocked || squadFull || positionFull;
+        else if (maxReached) { label = 'Máx. intentos'; title = `Has alcanzado el máximo de clausulazos (${maxClausulazos})`; }
+        else if (invalidClause) { label = 'Sin cláusula'; title = 'Este jugador no tiene cláusula válida'; }
+        else if (insufficientBudget) { label = 'Sin presupuesto'; title = 'No tienes suficiente presupuesto para esta cláusula'; }
+        const disabled = isOwn || blocked || squadFull || positionFull || maxReached || invalidClause || insufficientBudget;
         return `
         <div class="player-card">
             <img src="${p.photo || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'" style="height:60px;width:auto">

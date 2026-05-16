@@ -182,13 +182,18 @@ class DraftEngine:
                     return {"error": "Player not found"}
                 player = dict(player[0])
 
-            # Check position minimums won't be violated (max 23 players total)
+            # Check size limits against current draft picks and actual squad rows.
             team_players = await db.execute_fetchall(
                 "SELECT p.position FROM draft_picks dp JOIN players p ON dp.player_id=p.id WHERE dp.draft_id=$1 AND dp.team_id=$2",
                 (draft["id"], team_id),
             )
             current_count = len(team_players)
-            if current_count >= 23:
+            squad_count_rows = await db.execute_fetchall(
+                "SELECT COUNT(*)::int as cnt FROM team_players WHERE team_id=$1",
+                (team_id,),
+            )
+            squad_count = squad_count_rows[0]["cnt"] if squad_count_rows else 0
+            if max(current_count, squad_count) >= 23:
                 return {"error": "Team already full"}
 
             now = datetime.now(timezone.utc).isoformat()
