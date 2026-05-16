@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
 
 CREATE TABLE IF NOT EXISTS market_windows (
     id SERIAL PRIMARY KEY,
-    league_id TEXT NOT NULL REFERENCES leagues(id),
+    league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
     phase TEXT NOT NULL,
     market_type TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','clause_window','market_open','market_closed','reposition_draft','completed')),
@@ -227,7 +227,7 @@ CREATE TABLE IF NOT EXISTS market_windows (
 
 CREATE TABLE IF NOT EXISTS player_clauses (
     id SERIAL PRIMARY KEY,
-    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id) ON DELETE CASCADE,
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     player_id TEXT NOT NULL REFERENCES players(id),
     clause_amount INTEGER NOT NULL DEFAULT 0,
@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS player_clauses (
 
 CREATE TABLE IF NOT EXISTS market_budgets (
     id SERIAL PRIMARY KEY,
-    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id) ON DELETE CASCADE,
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     initial_budget INTEGER NOT NULL,
     earned_from_sales INTEGER DEFAULT 0,
@@ -253,7 +253,7 @@ CREATE TABLE IF NOT EXISTS market_budgets (
 
 CREATE TABLE IF NOT EXISTS market_transactions (
     id SERIAL PRIMARY KEY,
-    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id) ON DELETE CASCADE,
     buyer_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     seller_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     player_id TEXT NOT NULL REFERENCES players(id),
@@ -265,8 +265,8 @@ CREATE TABLE IF NOT EXISTS market_transactions (
 
 CREATE TABLE IF NOT EXISTS clause_attempts (
     id SERIAL PRIMARY KEY,
-    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
-    league_id TEXT NOT NULL REFERENCES leagues(id),
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id) ON DELETE CASCADE,
+    league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
     buyer_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     expected_seller_team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     player_id TEXT NOT NULL REFERENCES players(id),
@@ -281,11 +281,11 @@ CREATE TABLE IF NOT EXISTS clause_attempts (
 
 CREATE TABLE IF NOT EXISTS news_events (
     id SERIAL PRIMARY KEY,
-    league_id TEXT NOT NULL REFERENCES leagues(id),
+    league_id TEXT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
     event_type TEXT NOT NULL,
     title TEXT NOT NULL,
     body TEXT,
-    related_window_id INTEGER REFERENCES market_windows(id),
+    related_window_id INTEGER REFERENCES market_windows(id) ON DELETE CASCADE,
     related_team_id TEXT REFERENCES fantasy_teams(id),
     related_player_id TEXT REFERENCES players(id),
     created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
@@ -293,7 +293,7 @@ CREATE TABLE IF NOT EXISTS news_events (
 
 CREATE TABLE IF NOT EXISTS reposition_draft_picks (
     id SERIAL PRIMARY KEY,
-    market_window_id INTEGER NOT NULL REFERENCES market_windows(id),
+    market_window_id INTEGER NOT NULL REFERENCES market_windows(id) ON DELETE CASCADE,
     team_id TEXT NOT NULL REFERENCES fantasy_teams(id),
     pick_number INTEGER NOT NULL,
     player_id TEXT REFERENCES players(id),
@@ -504,6 +504,93 @@ async def init_db():
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(team_id)"
+        )
+
+        # Ensure market-related foreign keys cascade on delete for existing DBs.
+        await conn.execute(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'market_windows') THEN
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'market_windows_league_id_fkey') THEN
+                        ALTER TABLE market_windows DROP CONSTRAINT market_windows_league_id_fkey;
+                    END IF;
+                    ALTER TABLE market_windows
+                        ADD CONSTRAINT market_windows_league_id_fkey
+                        FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'player_clauses') THEN
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'player_clauses_market_window_id_fkey') THEN
+                        ALTER TABLE player_clauses DROP CONSTRAINT player_clauses_market_window_id_fkey;
+                    END IF;
+                    ALTER TABLE player_clauses
+                        ADD CONSTRAINT player_clauses_market_window_id_fkey
+                        FOREIGN KEY (market_window_id) REFERENCES market_windows(id) ON DELETE CASCADE;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'market_budgets') THEN
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'market_budgets_market_window_id_fkey') THEN
+                        ALTER TABLE market_budgets DROP CONSTRAINT market_budgets_market_window_id_fkey;
+                    END IF;
+                    ALTER TABLE market_budgets
+                        ADD CONSTRAINT market_budgets_market_window_id_fkey
+                        FOREIGN KEY (market_window_id) REFERENCES market_windows(id) ON DELETE CASCADE;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'market_transactions') THEN
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'market_transactions_market_window_id_fkey') THEN
+                        ALTER TABLE market_transactions DROP CONSTRAINT market_transactions_market_window_id_fkey;
+                    END IF;
+                    ALTER TABLE market_transactions
+                        ADD CONSTRAINT market_transactions_market_window_id_fkey
+                        FOREIGN KEY (market_window_id) REFERENCES market_windows(id) ON DELETE CASCADE;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'clause_attempts') THEN
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'clause_attempts_market_window_id_fkey') THEN
+                        ALTER TABLE clause_attempts DROP CONSTRAINT clause_attempts_market_window_id_fkey;
+                    END IF;
+                    ALTER TABLE clause_attempts
+                        ADD CONSTRAINT clause_attempts_market_window_id_fkey
+                        FOREIGN KEY (market_window_id) REFERENCES market_windows(id) ON DELETE CASCADE;
+
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'clause_attempts_league_id_fkey') THEN
+                        ALTER TABLE clause_attempts DROP CONSTRAINT clause_attempts_league_id_fkey;
+                    END IF;
+                    ALTER TABLE clause_attempts
+                        ADD CONSTRAINT clause_attempts_league_id_fkey
+                        FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'news_events') THEN
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'news_events_league_id_fkey') THEN
+                        ALTER TABLE news_events DROP CONSTRAINT news_events_league_id_fkey;
+                    END IF;
+                    ALTER TABLE news_events
+                        ADD CONSTRAINT news_events_league_id_fkey
+                        FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE;
+
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'news_events_related_window_id_fkey') THEN
+                        ALTER TABLE news_events DROP CONSTRAINT news_events_related_window_id_fkey;
+                    END IF;
+                    ALTER TABLE news_events
+                        ADD CONSTRAINT news_events_related_window_id_fkey
+                        FOREIGN KEY (related_window_id) REFERENCES market_windows(id) ON DELETE CASCADE;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'reposition_draft_picks') THEN
+                    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'reposition_draft_picks_market_window_id_fkey') THEN
+                        ALTER TABLE reposition_draft_picks DROP CONSTRAINT reposition_draft_picks_market_window_id_fkey;
+                    END IF;
+                    ALTER TABLE reposition_draft_picks
+                        ADD CONSTRAINT reposition_draft_picks_market_window_id_fkey
+                        FOREIGN KEY (market_window_id) REFERENCES market_windows(id) ON DELETE CASCADE;
+                END IF;
+            EXCEPTION WHEN duplicate_object THEN
+                NULL;
+            END $$;
+            """
         )
 
 
