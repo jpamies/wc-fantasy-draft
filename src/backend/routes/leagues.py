@@ -457,10 +457,9 @@ async def delete_league(league_id: str, auth: dict = Depends(get_current_team)):
         if await _table_exists(db, "news_events"):
             mw_ids = [mw["id"] for mw in market_win_rows]
             if mw_ids:
-                placeholders = ",".join(f"${{i+1}}" for i in range(len(mw_ids)))
                 await db.execute(
-                    f"DELETE FROM news_events WHERE related_window_id IN ({placeholders})",
-                    mw_ids,
+                    "DELETE FROM news_events WHERE related_window_id = ANY($1::int[])",
+                    (mw_ids,),
                 )
         for mw in market_win_rows:
             mw_id = mw["id"]
@@ -588,10 +587,9 @@ async def admin_reset_league(league_id: str, auth: dict = Depends(get_current_te
         if await _table_exists(db, "news_events"):
             mw_ids = [mw["id"] for mw in market_win_rows]
             if mw_ids:
-                placeholders = ",".join(f"${{i+1}}" for i in range(len(mw_ids)))
                 await db.execute(
-                    f"DELETE FROM news_events WHERE related_window_id IN ({placeholders})",
-                    mw_ids,
+                    "DELETE FROM news_events WHERE related_window_id = ANY($1::int[])",
+                    (mw_ids,),
                 )
         for mw in market_win_rows:
             mw_id = mw["id"]
