@@ -483,8 +483,8 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
     
     played_countries = await get_played_countries(matchday_id)
     matchday_started = len(played_countries) > 0
-    if matchday_started:
-        await ensure_matchday_snapshot(team_id, matchday_id)
+    # Always ensure snapshot so pre-matchday lineup editor has full squad rows.
+    await ensure_matchday_snapshot(team_id, matchday_id)
     
     db = await get_db()
     try:

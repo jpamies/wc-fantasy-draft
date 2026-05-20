@@ -68,11 +68,10 @@ Router.register('#/team', async (container) => {
         const area = document.getElementById('matchday-lineup-area');
         if (!area) return;
 
-        // Find matchday metadata
         const mdMeta = matchdays.find(md => md.id === mdId) || {};
         const isActive = mdMeta.status === 'active';
+        const isLocked = mdMeta.status !== 'upcoming';
 
-        // Highlight active tab
         container.querySelectorAll('.md-tab').forEach(btn => {
             btn.className = btn.dataset.mdid === mdId ? 'btn btn-gold md-tab' : 'btn btn-outline md-tab';
             if (btn.dataset.mdid === mdId) btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
@@ -86,106 +85,79 @@ Router.register('#/team', async (container) => {
             return;
         }
 
-        let currentLineup = { ...lineupData.starters };  // {GK: {...}, DEF: {...}, ...}
-        const bench = lineupData.bench || [];
-        
-        function renderLineupEditor() {
-            const slotOptions = {};
-            LINEUP_SLOTS.forEach(slot => {
-                slotOptions[slot] = [];
-                bench.forEach(p => {
-                    if (slot === 'WILDCARD' || p.position === slot) {
-                        slotOptions[slot].push(p);
-                    }
-                });
+        const startersFromApi = lineupData.starters || {};
+        const squadMap = new Map();
+        Object.values(startersFromApi).forEach(p => {
+            if (p && p.player_id) squadMap.set(p.player_id, p);
+        });
+        (lineupData.bench || []).forEach(p => {
+            if (p && p.player_id) squadMap.set(p.player_id, p);
+        });
+        const squadPlayers = Array.from(squadMap.values()).sort((a, b) => {
+            const p1 = POS_ORDER[a.position] ?? 99;
+            const p2 = POS_ORDER[b.position] ?? 99;
+            if (p1 !== p2) return p1 - p2;
+            return (a.name || '').localeCompare(b.name || '');
+        });
+        const currentLineup = {};
+        LINEUP_SLOTS.forEach(slot => {
+            currentLineup[slot] = startersFromApi[slot] || null;
+        });
+        let activeSlot = 'GK';
+
+        const slotLabel = (slot) => (slot === 'WILDCARD' ? 'WILDCARD' : slot);
+        const slotAccepts = (slot, pos) => slot === 'WILDCARD' || slot === pos;
+
+        const assignPlayerToSlot = (slot, player) => {
+            LINEUP_SLOTS.forEach(s => {
+                if (currentLineup[s]?.player_id === player.player_id) currentLineup[s] = null;
             });
-            
-            return `
-                <div class="card mb-2">
-                    <div class="card-header">⚽ Alineación (5 jugadores)</div>
-                    <div class="lineup-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;padding:1rem">
-                        ${LINEUP_SLOTS.map(slot => {
-                            const currentPlayer = currentLineup[slot];
-                            const label = slot === 'WILDCARD' ? '🃏 Wildcard' : slot;
-                            return `
-                                <div class="slot-selector">
-                                    <label style="font-weight:600;font-size:.9rem">${label}</label>
-                                    <select class="slot-player" data-slot="${slot}" ${isActive ? 'disabled' : ''}>
-                                        <option value="">— Seleccionar —</option>
-                                        ${(slotOptions[slot] || [])
-                                            .map(p => `<option value="${p.player_id}" ${currentPlayer?.player_id === p.player_id ? 'selected' : ''}>
-                                                ${p.name} (${p.country_code}) ${p.country_played ? '🚫' : ''}
-                                            </option>`)
-                                            .join('')}
-                                    </select>
-                                    ${currentPlayer ? `<div style="font-size:.75rem;margin-top:.3rem;color:var(--text-muted)">${currentPlayer.name}</div>` : ''}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                    <div style="padding:0 1rem;margin-top:1rem">
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
-                            <div>
-                                <label style="font-weight:600;font-size:.9rem">⚡ Capitán</label>
-                                <select id="select-captain" ${isActive ? 'disabled' : ''}>
-                                    <option value="">— Ninguno —</option>
-                                    ${Object.values(currentLineup)
-                                        .filter(p => p)
-                                        .map(p => `<option value="${p.player_id}" ${p.player_id === lineupData.captain_id ? 'selected' : ''}>
-                                            ${p.name}
-                                        </option>`)
-                                        .join('')}
-                                </select>
-                            </div>
-                            <div>
-                                <label style="font-weight:600;font-size:.9rem">⚙️ Vice-Capitán</label>
-                                <select id="select-vice-captain" ${isActive ? 'disabled' : ''}>
-                                    <option value="">— Ninguno —</option>
-                                    ${Object.values(currentLineup)
-                                        .filter(p => p)
-                                        .map(p => `<option value="${p.player_id}" ${p.player_id === lineupData.vice_captain_id ? 'selected' : ''}>
-                                            ${p.name}
-                                        </option>`)
-                                        .join('')}
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    ${!isActive ? `<button class="btn btn-primary" id="btn-save-lineup-5" style="margin:1rem">💾 Guardar alineación</button>` : ''}
-                </div>
-            `;
-        }
-        
-        function renderInGameSubs() {
+            currentLineup[slot] = player;
+        };
+
+        const buildSpec = () => {
+            const spec = {};
+            for (const slot of LINEUP_SLOTS) {
+                const p = currentLineup[slot];
+                if (!p?.player_id) return null;
+                if (!slotAccepts(slot, p.position)) return null;
+                spec[slot] = p.player_id;
+            }
+            const unique = new Set(Object.values(spec));
+            if (unique.size !== LINEUP_SIZE) return null;
+            return spec;
+        };
+
+        const renderInGameSubs = () => {
             if (!isActive) return '';
-            
-            const playedBench = bench.filter(p => p.matchday_minutes > 0);
-            const unplayedBench = bench.filter(p => p.matchday_minutes === 0);
-            
+            const starters = LINEUP_SLOTS.map(slot => currentLineup[slot]).filter(Boolean);
+            const starterIds = new Set(starters.map(p => p.player_id));
+            const bench = squadPlayers.filter(p => !starterIds.has(p.player_id));
+            const unplayedBench = bench.filter(p => (p.matchday_minutes || 0) === 0);
+
             return `
                 <div class="card mb-2">
-                    <div class="card-header">🔄 Cambios en vivo</div>
+                    <div class="card-header">Cambios en vivo</div>
                     <div style="font-size:.85rem;color:var(--text-muted);margin-bottom:1rem">
-                        ✅ Saca: Jugador que YA HA JUGADO<br>
-                        ✅ Mete: Jugador que NO HA JUGADO
+                        Sale: jugador que ya jugo. Entra: jugador que no ha jugado.
                     </div>
                     <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:1rem;align-items:end">
                         <div>
-                            <label style="font-size:.85rem">Sacar (ya ha jugado)</label>
+                            <label style="font-size:.85rem">Sacar</label>
                             <select id="sub-out-player">
-                                <option value="">— Seleccionar —</option>
-                                ${Object.values(currentLineup).map(p => `
-                                    <option value="${p.player_id}" ${p.matchday_minutes > 0 ? '' : 'disabled'}>
-                                        ${p.name} (${p.matchday_minutes}min)
+                                <option value="">Seleccionar</option>
+                                ${starters.map(p => `
+                                    <option value="${p.player_id}" ${(p.matchday_minutes || 0) > 0 ? '' : 'disabled'}>
+                                        ${p.name} (${p.matchday_minutes || 0}min)
                                     </option>
                                 `).join('')}
                             </select>
                         </div>
                         <button class="btn btn-gold" style="padding:0.5rem 1rem">⇄</button>
                         <div>
-                            <label style="font-size:.85rem">Meter (no ha jugado)</label>
+                            <label style="font-size:.85rem">Meter</label>
                             <select id="sub-in-player">
-                                <option value="">— Seleccionar —</option>
+                                <option value="">Seleccionar</option>
                                 ${unplayedBench.map(p => `
                                     <option value="${p.player_id}">
                                         ${p.name} (${p.country_code})
@@ -194,65 +166,127 @@ Router.register('#/team', async (container) => {
                             </select>
                         </div>
                     </div>
-                    ${unplayedBench.length === 0 ? '<div style="margin-top:1rem;color:var(--accent-red);font-size:.85rem">⚠️ No hay jugadores sin jugar disponibles</div>' : ''}
-                    <button class="btn btn-gold mt-1" id="btn-perform-sub" ${unplayedBench.length === 0 ? 'disabled' : ''}>✅ Hacer cambio</button>
+                    ${unplayedBench.length === 0 ? '<div style="margin-top:1rem;color:var(--accent-red);font-size:.85rem">No hay jugadores sin jugar disponibles</div>' : ''}
+                    <button class="btn btn-gold mt-1" id="btn-perform-sub" ${unplayedBench.length === 0 ? 'disabled' : ''}>Hacer cambio</button>
                 </div>
             `;
-        }
+        };
 
-        area.innerHTML = renderLineupEditor() + renderInGameSubs();
+        const render = () => {
+            area.innerHTML = `
+                <div class="card mb-2">
+                    <div class="card-header">Alineacion de jornada (5)</div>
+                    <div style="font-size:.85rem;color:var(--text-muted);padding:0 1rem .8rem 1rem">
+                        Obligatorio: 1 GK, 1 DEF, 1 MID, 1 FWD y 1 WILDCARD (cualquier posicion).
+                        ${isLocked ? ' La jornada esta bloqueada para editar.' : ' Selecciona un slot arriba y mete jugadores desde tu plantilla abajo.'}
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.75rem;padding:0 1rem 1rem 1rem">
+                        ${LINEUP_SLOTS.map(slot => {
+                            const p = currentLineup[slot];
+                            const selected = activeSlot === slot;
+                            return `
+                                <div class="slot-card" data-slot="${slot}" style="border:2px solid ${selected ? 'var(--accent-gold)' : 'var(--border)'};border-radius:10px;padding:.6rem;cursor:${isLocked ? 'default' : 'pointer'};background:var(--bg-secondary)">
+                                    <div style="font-weight:700;font-size:.85rem;margin-bottom:.4rem">${slotLabel(slot)}</div>
+                                    ${p ? `
+                                        <div style="font-size:.85rem;line-height:1.2">${p.name}</div>
+                                        <div style="font-size:.75rem;color:var(--text-muted)">${p.position} · ${p.country_code}</div>
+                                        ${!isLocked ? `<button class="btn btn-sm btn-outline btn-clear-slot" data-slot="${slot}" style="margin-top:.45rem">Quitar</button>` : ''}
+                                    ` : `<div style="font-size:.8rem;color:var(--text-muted)">Vacio</div>`}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    ${!isLocked ? `<div style="padding:0 1rem 1rem 1rem"><button class="btn btn-primary" id="btn-save-lineup-5">Guardar alineacion</button></div>` : ''}
+                </div>
 
-        // Event listeners for lineup editor
-        document.getElementById('btn-save-lineup-5')?.addEventListener('click', async () => {
-            const spec = {};
-            let valid = true;
-            LINEUP_SLOTS.forEach(slot => {
-                const select = document.querySelector(`.slot-player[data-slot="${slot}"]`);
-                const playerId = select?.value;
-                if (!playerId) {
-                    valid = false;
-                    showToast(`${slot} slot vacío`, 'error');
-                }
-                spec[slot] = playerId;
-            });
-            
-            if (!valid) return;
-            
-            const captainId = document.getElementById('select-captain').value || null;
-            const viceCaptainId = document.getElementById('select-vice-captain').value || null;
-            if (captainId) spec.captain_id = captainId;
-            if (viceCaptainId) spec.vice_captain_id = viceCaptainId;
-            
-            try {
-                const result = await API.patch(`/teams/${teamId}/lineup-5/${mdId}`, spec);
-                showToast('✅ Alineación guardada', 'success');
-                loadMatchdayLineup(mdId);
-            } catch (err) {
-                showToast(`❌ ${err.message}`, 'error');
-            }
-        });
+                <div class="card mb-2">
+                    <div class="card-header">Tu plantilla (${squadPlayers.length}/${SQUAD_SIZE_MAX})</div>
+                    <div style="padding:.75rem;display:grid;gap:.45rem">
+                        ${squadPlayers.map(p => {
+                            const active = activeSlot;
+                            const canPlace = !!active && slotAccepts(active, p.position) && !isLocked;
+                            const inSlot = LINEUP_SLOTS.find(s => currentLineup[s]?.player_id === p.player_id);
+                            return `
+                                <div style="display:flex;align-items:center;gap:.6rem;padding:.45rem .5rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
+                                    ${posBadge(p.position)}
+                                    <div style="flex:1;min-width:0">
+                                        <div style="font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</div>
+                                        <div style="font-size:.74rem;color:var(--text-muted)">${p.country_code} · ${p.position}</div>
+                                    </div>
+                                    ${inSlot ? `<span class="badge badge-gold" style="font-size:.72rem">En ${inSlot}</span>` : ''}
+                                    ${!isLocked ? `<button class="btn btn-sm ${canPlace ? 'btn-gold' : 'btn-outline'} btn-place-player" data-pid="${p.player_id}" ${canPlace ? '' : 'disabled'}>Meter en ${activeSlot}</button>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
 
-        // Event listeners for in-game subs
-        document.getElementById('btn-perform-sub')?.addEventListener('click', async () => {
-            const outId = document.getElementById('sub-out-player').value;
-            const inId = document.getElementById('sub-in-player').value;
-            
-            if (!outId || !inId) {
-                showToast('Selecciona ambos jugadores', 'error');
-                return;
-            }
-            
-            try {
-                const result = await API.post(`/teams/${teamId}/matchday/${mdId}/in-game-sub`, {
-                    player_out_id: outId,
-                    player_in_id: inId
+                ${renderInGameSubs()}
+            `;
+
+            if (!isLocked) {
+                area.querySelectorAll('.slot-card').forEach(el => {
+                    el.addEventListener('click', () => {
+                        activeSlot = el.dataset.slot;
+                        render();
+                    });
                 });
-                showToast(`✅ ${result.message}`, 'success');
-                loadMatchdayLineup(mdId);
-            } catch (err) {
-                showToast(`❌ ${err.message}`, 'error');
+
+                area.querySelectorAll('.btn-clear-slot').forEach(el => {
+                    el.addEventListener('click', (ev) => {
+                        ev.stopPropagation();
+                        currentLineup[el.dataset.slot] = null;
+                        render();
+                    });
+                });
+
+                area.querySelectorAll('.btn-place-player').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const pid = el.dataset.pid;
+                        const player = squadPlayers.find(p => p.player_id === pid);
+                        if (!player || !slotAccepts(activeSlot, player.position)) return;
+                        assignPlayerToSlot(activeSlot, player);
+                        render();
+                    });
+                });
+
+                area.querySelector('#btn-save-lineup-5')?.addEventListener('click', async () => {
+                    const spec = buildSpec();
+                    if (!spec) {
+                        showToast('Completa 5 slots validos (1 por posicion + wildcard)', 'error');
+                        return;
+                    }
+                    try {
+                        await API.patch(`/teams/${teamId}/lineup-5/${mdId}`, spec);
+                        showToast('Alineacion guardada', 'success');
+                        await loadMatchdayLineup(mdId);
+                    } catch (err) {
+                        showToast(`Error: ${err.message}`, 'error');
+                    }
+                });
             }
-        });
+
+            area.querySelector('#btn-perform-sub')?.addEventListener('click', async () => {
+                const outId = area.querySelector('#sub-out-player')?.value;
+                const inId = area.querySelector('#sub-in-player')?.value;
+                if (!outId || !inId) {
+                    showToast('Selecciona ambos jugadores', 'error');
+                    return;
+                }
+                try {
+                    const result = await API.post(`/teams/${teamId}/matchday/${mdId}/in-game-sub`, {
+                        player_out_id: outId,
+                        player_in_id: inId,
+                    });
+                    showToast(result.message || 'Cambio realizado', 'success');
+                    await loadMatchdayLineup(mdId);
+                } catch (err) {
+                    showToast(`Error: ${err.message}`, 'error');
+                }
+            });
+        };
+
+        render();
     }
 
     // Tab switching
