@@ -250,12 +250,14 @@ Router.register('#/team', async (container) => {
                                     <div style="min-width:0">
                                         <div style="font-size:.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</div>
                                         <div style="font-size:.74rem;color:var(--text-muted)">${p.country_code} · ${p.market_value ? formatMoney(p.market_value) : 'N/A'}</div>
-                                        <div style="font-size:.72rem;margin-top:.2rem;display:flex;gap:.8rem">
-                                            <span><span style="color:var(--text-muted)">Jornada:</span> <span style="color:var(--accent-teal);font-weight:600">${p.matchday_points || 0}</span></span>
-                                            <span><span style="color:var(--text-muted)">Total:</span> <span style="color:var(--accent-gold);font-weight:600">${p.total_points || 0}</span></span>
-                                        </div>
                                     </div>
                                     <div style="display:flex;flex-direction:column;gap:.35rem;align-items:flex-end">
+                                        <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;margin-bottom:.15rem">
+                                            <div style="font-size:.72rem;color:var(--text-muted)">Jornada</div>
+                                            <div style="font-size:1.15rem;color:var(--accent-teal);font-weight:800">${p.matchday_points || 0}</div>
+                                            <div style="font-size:.72rem;color:var(--text-muted);margin-top:.15rem">Total</div>
+                                            <div style="font-size:1.05rem;color:var(--accent-gold);font-weight:800">${p.total_points || 0}</div>
+                                        </div>
                                         ${inSlot ? `<span class="badge badge-gold" style="font-size:.7rem">En ${inSlot}</span>` : ''}
                                         ${!inSlot && hasPlayed ? `<span class="badge" style="font-size:.7rem;background:var(--border);color:var(--text-muted)">Ya jugo</span>` : ''}
                                         ${!isLocked ? `
