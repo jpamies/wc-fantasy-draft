@@ -1,14 +1,117 @@
-"""Matchday lineup service — snapshot, swaps, and validation."""
+"""Lineup service for 5-player matchday lineups and in-game substitutions."""
 
 import logging
+from datetime import datetime
 from src.backend.database import get_db
-from src.backend.config import settings
 
 logger = logging.getLogger("wc-fantasy.lineup")
 
+LINEUP_STRUCTURE = {"GK": 1, "DEF": 1, "MID": 1, "FWD": 1, "WILDCARD": 1}
+LINEUP_SIZE = 5
 
-async def _get_played_countries(matchday_id: str) -> set[str]:
-    """Get country codes that have already played in this matchday (from simulator)."""
+
+async def validate_5_player_lineup(team_id: str, lineup_spec: dict) -> tuple[bool, str]:
+    """
+    Validate a 5-player lineup structure:
+    {
+        'GK': player_id,
+        'DEF': player_id,
+        'MID': player_id,
+        'FWD': player_id,
+        'WILDCARD': player_id
+    }
+    
+    Rules:
+    1. Cada slot debe tener un jugador del equipo
+    2. El wildcard puede ser de cualquier posición
+    3. Ningún jugador duplicado entre slots
+    4. Los 4 slots normales deben respetar posición (GK=GK, DEF=DEF, etc.)
+    """
+    db = await get_db()
+    try:
+        # Fetch team's players
+        players = await db.execute_fetchall(
+            """SELECT tp.player_id, p.position FROM team_players tp 
+               JOIN players p ON tp.player_id = p.id 
+               WHERE tp.team_id = $1""",
+            (team_id,),
+        )
+        
+        if len(players) < 5:
+            return False, f"Need min 5 players in squad (have {len(players)})"
+        
+        squad_map = {p["player_id"]: p["position"] for p in players}
+        player_ids = set(lineup_spec.values())
+        
+        # Check all players in lineup belong to team
+        if not player_ids.issubset(set(squad_map.keys())):
+            return False, "Some players not in your squad"
+        
+        # Check no duplicates
+        if len(player_ids) != LINEUP_SIZE:
+            return False, "Duplicate players in lineup"
+        
+        # Validate position constraints
+        for slot, player_id in lineup_spec.items():
+            if slot == "WILDCARD":
+                continue  # Wildcard can be any position
+            
+            actual_pos = squad_map[player_id]
+            if actual_pos != slot:
+                return False, f"Player in {slot} slot must be {slot}, not {actual_pos}"
+        
+        return True, "OK"
+    finally:
+        await db.close()
+
+
+async def ensure_matchday_snapshot(team_id: str, matchday_id: str):
+    """Create matchday lineup snapshot from team_players if not exists.
+    Called when matchday starts or when user first accesses lineup."""
+    db = await get_db()
+    try:
+        # Check if snapshot already exists
+        existing = await db.execute_fetchall(
+            "SELECT COUNT(*) as c FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2",
+            (team_id, matchday_id),
+        )
+        if existing[0]["c"] > 0:
+            return  # Already snapshotted
+        
+        # Ensure matchday row exists for FK integrity
+        md_exists = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=$1", (matchday_id,))
+        if not md_exists:
+            await db.execute(
+                "INSERT INTO matchdays (id, name, date, phase, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING",
+                (matchday_id, matchday_id, "", "groups", "upcoming"),
+            )
+        
+        # Create snapshot from current team_players
+        players = await db.execute_fetchall(
+            """SELECT player_id, is_starter, is_captain, is_vice_captain 
+               FROM team_players WHERE team_id=$1""",
+            (team_id,),
+        )
+        
+        for p in players:
+            await db.execute(
+                """INSERT INTO matchday_lineups
+                   (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain, is_wildcard, position_slot)
+                   VALUES ($1, $2, $3, $4, $5, $6, 0, NULL)""",
+                (team_id, matchday_id, p["player_id"],
+                 p["is_starter"], p["is_captain"], p["is_vice_captain"]),
+            )
+        
+        await db.commit()
+        logger.info(f"Created lineup snapshot for team {team_id} matchday {matchday_id}: {len(players)} players")
+    finally:
+        await db.close()
+
+
+async def get_played_countries(matchday_id: str) -> set[str]:
+    """Get country codes that have already played in this matchday."""
+    from src.backend.config import settings
+    
     if not settings.SIMULATOR_API_URL:
         return set()
     
@@ -37,193 +140,98 @@ async def _get_played_countries(matchday_id: str) -> set[str]:
         return set()
 
 
-async def is_matchday_started(matchday_id: str) -> bool:
-    """A matchday has started if at least one match is finished."""
-    played = await _get_played_countries(matchday_id)
-    return len(played) > 0
-
-
-async def ensure_matchday_snapshot(team_id: str, matchday_id: str):
-    """Create matchday lineup snapshot from current team_players if not exists.
-    Called when matchday starts or when user first accesses lineup."""
-    db = await get_db()
-    try:
-        # Check if snapshot already exists
-        existing = await db.execute_fetchall(
-            "SELECT COUNT(*) as c FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2",
-            (team_id, matchday_id),
-        )
-        if existing[0]["c"] > 0:
-            return  # Already snapshotted
-        
-        # Ensure matchday row exists for FK integrity
-        md_exists = await db.execute_fetchall("SELECT id FROM matchdays WHERE id=$1", (matchday_id,))
-        if not md_exists:
-            await db.execute(
-                "INSERT INTO matchdays (id, name, date, phase, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING",
-                (matchday_id, matchday_id, "", "groups", "upcoming"),
-            )
-        
-        # Create snapshot from current team_players
-        players = await db.execute_fetchall(
-            """SELECT player_id, is_starter, is_captain, is_vice_captain
-               FROM team_players WHERE team_id=$1""",
-            (team_id,),
-        )
-        
-        for p in players:
-            await db.execute(
-                """INSERT INTO matchday_lineups
-                   (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain)
-                   VALUES ($1, $2, $3, $4, $5, $6)""",
-                (team_id, matchday_id, p["player_id"],
-                 p["is_starter"], p["is_captain"], p["is_vice_captain"]),
-            )
-        
-        await db.commit()
-        logger.info(f"Created lineup snapshot for team {team_id} matchday {matchday_id}: {len(players)} players")
-    finally:
-        await db.close()
-
-
-async def get_lineup_status(team_id: str, matchday_id: str) -> dict:
-    """Get current lineup with played/not-played status for each player."""
-    played_countries = await _get_played_countries(matchday_id)
-    started = len(played_countries) > 0
-    
-    # Ensure snapshot exists if matchday started
-    if started:
-        await ensure_matchday_snapshot(team_id, matchday_id)
-    
-    db = await get_db()
-    try:
-        # Get lineup (snapshot if exists, otherwise current team)
-        lineup = await db.execute_fetchall(
-            """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain,
-                      p.name, p.position, p.country_code, p.photo, p.strength
-               FROM matchday_lineups ml
-               JOIN players p ON ml.player_id = p.id
-               WHERE ml.team_id=$1 AND ml.matchday_id=$2""",
-            (team_id, matchday_id),
-        )
-        
-        if not lineup:
-            # No snapshot yet, show current team
-            lineup = await db.execute_fetchall(
-                """SELECT tp.player_id, tp.is_starter, tp.is_captain, tp.is_vice_captain,
-                          p.name, p.position, p.country_code, p.photo, p.strength
-                   FROM team_players tp
-                   JOIN players p ON tp.player_id = p.id
-                   WHERE tp.team_id=$1""",
-                (team_id,),
-            )
-        
-        # Get scores for this matchday
-        player_ids = [p["player_id"] for p in lineup]
-        scores = {}
-        if player_ids:
-            placeholders = ",".join(f"${i+2}" for i in range(len(player_ids)))
-            score_rows = await db.execute_fetchall(
-                f"SELECT player_id, total_points, minutes_played FROM match_scores WHERE matchday_id=$1 AND player_id IN ({placeholders})",
-                (matchday_id, *player_ids),
-            )
-            scores = {s["player_id"]: dict(s) for s in score_rows}
-        
-        players = []
-        for p in lineup:
-            p = dict(p)
-            country_played = p["country_code"] in played_countries
-            score = scores.get(p["player_id"])
-            p["country_played"] = country_played
-            p["points"] = score["total_points"] if score else None
-            p["can_bench"] = True  # Can always remove from starters
-            p["can_start"] = not country_played  # Can only start if country hasn't played
-            players.append(p)
-        
-        return {
-            "matchday_id": matchday_id,
-            "started": started,
-            "played_countries": sorted(played_countries),
-            "players": players,
-        }
-    finally:
-        await db.close()
-
-
-async def swap_player(team_id: str, matchday_id: str, bench_player_id: str, starter_player_id: str) -> dict:
-    """Swap a starter with a bench player during a live matchday.
+async def can_perform_substitution(team_id: str, matchday_id: str, player_out_id: str, player_in_id: str) -> tuple[bool, str]:
+    """
+    Check if a mid-matchday substitution is allowed.
     
     Rules:
-    - Matchday must have started
-    - bench_player_id: must be on bench, their country must NOT have played
-    - starter_player_id: must be a starter (can have played or not)
-    - The starter loses their points, the bench player will score when their country plays
+    ✅ player_out must have already played (minutes_played > 0)
+    ✅ player_in must NOT have played yet (minutes_played = 0 or no match_scores row)
+    ✅ Both players in team's current lineup
+    ✅ player_out must be a starter
+    ✅ player_in must be on bench
     """
-    # Verify matchday started
-    played_countries = await _get_played_countries(matchday_id)
-    if not played_countries:
-        return {"error": "Matchday has not started yet. Set lineup before it starts."}
-    
-    # Ensure snapshot exists
-    await ensure_matchday_snapshot(team_id, matchday_id)
-    
     db = await get_db()
     try:
-        # Get both players from lineup
-        starter = await db.execute_fetchall(
-            """SELECT ml.player_id, ml.is_starter, p.country_code, p.name
-               FROM matchday_lineups ml JOIN players p ON ml.player_id = p.id
-               WHERE ml.team_id=$1 AND ml.matchday_id=$2 AND ml.player_id=$3""",
-            (team_id, matchday_id, starter_player_id),
+        # Check matchday is active
+        matchday = await db.execute_fetchall(
+            "SELECT status FROM matchdays WHERE id=$1",
+            (matchday_id,)
         )
-        bench = await db.execute_fetchall(
-            """SELECT ml.player_id, ml.is_starter, p.country_code, p.name
-               FROM matchday_lineups ml JOIN players p ON ml.player_id = p.id
-               WHERE ml.team_id=$1 AND ml.matchday_id=$2 AND ml.player_id=$3""",
-            (team_id, matchday_id, bench_player_id),
+        if not matchday or matchday[0]["status"] != "active":
+            return False, "Matchday must be active"
+        
+        # Get current lineup (from matchday_lineups)
+        lineup = await db.execute_fetchall(
+            "SELECT player_id FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2",
+            (team_id, matchday_id)
+        )
+        lineup_ids = {p["player_id"] for p in lineup}
+        
+        if player_out_id not in lineup_ids:
+            return False, f"Player {player_out_id} not in current lineup"
+        if player_in_id not in lineup_ids:
+            return False, f"Player {player_in_id} not in current squad"
+        
+        # Check player_out is currently a starter
+        out_starter = await db.execute_fetchall(
+            "SELECT is_starter FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3",
+            (team_id, matchday_id, player_out_id)
+        )
+        if not out_starter or not out_starter[0]["is_starter"]:
+            return False, f"Player {player_out_id} is not a current starter"
+        
+        # Check player_in is currently on bench
+        in_bench = await db.execute_fetchall(
+            "SELECT is_starter FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3",
+            (team_id, matchday_id, player_in_id)
+        )
+        if not in_bench or in_bench[0]["is_starter"]:
+            return False, f"Player {player_in_id} must be on bench"
+        
+        # Check player_out has played (minutes > 0)
+        out_score = await db.execute_fetchall(
+            "SELECT minutes_played FROM match_scores WHERE player_id=$1 AND matchday_id=$2",
+            (player_out_id, matchday_id)
+        )
+        if not out_score or out_score[0]["minutes_played"] == 0:
+            return False, f"Can only sub OUT players who have already played (minutes > 0)"
+        
+        # Check player_in has NOT played (minutes = 0 or no row)
+        in_score = await db.execute_fetchall(
+            "SELECT minutes_played FROM match_scores WHERE player_id=$1 AND matchday_id=$2",
+            (player_in_id, matchday_id)
+        )
+        if in_score and in_score[0]["minutes_played"] > 0:
+            return False, f"Can only sub IN players who haven't played yet"
+        
+        return True, "OK"
+    finally:
+        await db.close()
+
+
+async def validate_lineup_for_scoring(team_id: str, matchday_id: str) -> tuple[bool, str]:
+    """
+    Before scoring, check:
+    1. Lineup has exactly 5 starters
+    2. 4 normales + 1 wildcard
+    3. No duplicados
+    4. Todos pertenecen al equipo
+    """
+    db = await get_db()
+    try:
+        starters = await db.execute_fetchall(
+            """SELECT COUNT(*) as cnt, SUM(CASE WHEN is_wildcard=1 THEN 1 ELSE 0 END) as wildcard_count 
+               FROM matchday_lineups 
+               WHERE team_id=$1 AND matchday_id=$2 AND is_starter=1""",
+            (team_id, matchday_id)
         )
         
-        if not starter:
-            return {"error": f"Player {starter_player_id} not in your matchday lineup"}
-        if not bench:
-            return {"error": f"Player {bench_player_id} not in your matchday lineup"}
+        if not starters or starters[0]["cnt"] != LINEUP_SIZE:
+            return False, f"Invalid lineup: {starters[0]['cnt'] if starters else 0} starters, need {LINEUP_SIZE}"
+        if starters[0]["wildcard_count"] != 1:
+            return False, "Lineup must have exactly 1 wildcard"
         
-        starter = dict(starter[0])
-        bench = dict(bench[0])
-        
-        # Validate: starter must be a starter
-        if not starter["is_starter"]:
-            return {"error": f"{starter['name']} is not a starter"}
-        
-        # Validate: bench player must be on bench
-        if bench["is_starter"]:
-            return {"error": f"{bench['name']} is already a starter"}
-        
-        # Validate: bench player's country must NOT have played
-        if bench["country_code"] in played_countries:
-            return {"error": f"{bench['name']}'s country ({bench['country_code']}) has already played. Cannot promote to starter."}
-        
-        # Validate: starter's country must NOT have played (locked players can't be moved)
-        if starter["country_code"] in played_countries:
-            return {"error": f"{starter['name']}'s country ({starter['country_code']}) has already played. Cannot move to bench."}
-        
-        # Execute swap
-        await db.execute(
-            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3",
-            (team_id, matchday_id, starter_player_id),
-        )
-        await db.execute(
-            "UPDATE matchday_lineups SET is_starter=1 WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3",
-            (team_id, matchday_id, bench_player_id),
-        )
-        await db.commit()
-        
-        logger.info(f"Swap: team {team_id} md {matchday_id}: {starter['name']} → bench, {bench['name']} → starter")
-        
-        return {
-            "ok": True,
-            "benched": {"id": starter_player_id, "name": starter["name"], "country_played": starter["country_code"] in played_countries},
-            "started": {"id": bench_player_id, "name": bench["name"]},
-        }
+        return True, "OK"
     finally:
         await db.close()

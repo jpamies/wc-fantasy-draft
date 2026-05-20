@@ -122,6 +122,19 @@ class LineupUpdate(BaseModel):
     captain: Optional[str] = None
     vice_captain: Optional[str] = None
 
+class LineupSpec5(BaseModel):
+    """5-player lineup spec with slots GK, DEF, MID, FWD, WILDCARD"""
+    GK: str
+    DEF: str
+    MID: str
+    FWD: str
+    WILDCARD: str
+
+class InGameSubstitutionRequest(BaseModel):
+    """In-game substitution request"""
+    player_out_id: str
+    player_in_id: str
+
 
 # --- Draft ---
 class DraftPickRequest(BaseModel):

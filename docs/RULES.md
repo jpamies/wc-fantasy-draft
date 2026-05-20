@@ -14,38 +14,40 @@
 
 ### Equipo fantasy
 - Cada participante gestiona **un equipo fantasy**.
-- Plantilla de **23 jugadores** (de cualquier selección del Mundial).
-- **11 titulares** que puntúan + **12 suplentes** (reservas).
-- Un **capitán** que puntúa doble.
+- Plantilla de **12 jugadores** máximo (5 titulares + 7 suplentes).
+- **5 titulares por jornada**: GK, DEF, MID, FWD, WILDCARD (puede ser cualquier posición).
+- Un **wildcard slot** que permite máxima flexibilidad en fases finales.
 
 ### Jornada
 - Cada día de partidos del Mundial es una **jornada**.
 - Los puntos se acumulan jornada a jornada.
 - La clasificación se actualiza al finalizar cada jornada.
+- 🆕 **Cambios en vivo**: Durante la jornada, puedes hacer cambios si:
+  - **Sacas un jugador que YA ha jugado** (perdiendo sus puntos)
+  - **Metes un jugador que NO ha jugado** (para ganar puntos futuros)
 
 ---
 
-## 2. Formaciones permitidas
+## 2. 🆕 Alineación (5 jugadores)
 
-El participante elige una formación para sus 11 titulares:
+Cada jornada configuras una alineación de **exactamente 5 jugadores**:
 
-| Formación | GK | DEF | MID | FWD |
-|---|---|---|---|---|
-| 4-3-3 | 1 | 4 | 3 | 3 |
-| 4-4-2 | 1 | 4 | 4 | 2 |
-| 3-5-2 | 1 | 3 | 5 | 2 |
-| 3-4-3 | 1 | 3 | 4 | 3 |
-| 5-3-2 | 1 | 5 | 3 | 2 |
-| 5-4-1 | 1 | 5 | 4 | 1 |
-| 4-5-1 | 1 | 4 | 5 | 1 |
+| Slot | Posición | Descripción |
+|---|---|---|
+| GK | Portero | 1 jugador |
+| DEF | Defensa | 1 jugador |
+| MID | Mediocampo | 1 jugador |
+| FWD | Delantero | 1 jugador |
+| WILDCARD 🃏 | Cualquiera | 1 jugador (puede ser GK/DEF/MID/FWD) |
 
-- Siempre **1 portero** titular.
-- La formación se puede cambiar entre jornadas.
-- **Deadline de alineación**: 1 hora antes del primer partido de la jornada.
+- El **wildcard** permite máxima adaptabilidad cuando los equipos avanzan fases.
+- **No hay capitán/vicecapitán** en este sistema (simplificado para fases rápidas).
+- La alineación se **bloquea cuando comienza la jornada** (no se pueden hacer cambios antes).
+- **Cambios en vivo** permitidos si son dentro de las reglas de subs.
 
 ---
 
-## 3. 🆕 Draft Mode
+## 3. 🆕 Cambios en vivo (In-game Subs)
 
 A diferencia de los fantasy donde todos pueden tener a Mbappé, en **Draft Mode**
 cada jugador solo puede pertenecer a un equipo dentro de la liga.

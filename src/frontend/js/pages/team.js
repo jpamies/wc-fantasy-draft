@@ -16,9 +16,10 @@ Router.register('#/team', async (container) => {
         else if (matchdays.length > 0) defaultMdIndex = matchdays.length - 1;
     } catch {}
 
-    const POS_LIMITS = {GK: {min:1, max:1}, DEF: {min:3, max:5}, MID: {min:2, max:5}, FWD: {min:1, max:3}};
-    const POS_ORDER = {GK:0, DEF:1, MID:2, FWD:3};
-    const POS_LABELS = {GK:'Portero', DEF:'Defensa', MID:'Mediocampo', FWD:'Delantera'};
+    const LINEUP_SLOTS = ['GK', 'DEF', 'MID', 'FWD', 'WILDCARD'];
+    const POS_ORDER = {GK:0, DEF:1, MID:2, FWD:3, WILDCARD:4};
+    const SQUAD_SIZE_MAX = 12;
+    const LINEUP_SIZE = 5;
 
     // Show team header
     container.innerHTML = `
@@ -29,7 +30,7 @@ Router.register('#/team', async (container) => {
         <div class="grid grid-3 mb-2">
             <div class="card text-center">
                 <div style="font-size:.85rem;color:var(--text-secondary)">Jugadores</div>
-                <div style="font-size:1.5rem;font-weight:700">${team.players.length}/23</div>
+                <div style="font-size:1.5rem;font-weight:700">${team.players.length}/${SQUAD_SIZE_MAX}</div>
             </div>
             <div class="card text-center">
                 <div style="font-size:.85rem;color:var(--text-secondary)">Puntos totales</div>
@@ -69,305 +70,156 @@ Router.register('#/team', async (container) => {
 
         // Find matchday metadata
         const mdMeta = matchdays.find(md => md.id === mdId) || {};
-        const isCompleted = mdMeta.status === 'completed';
+        const isActive = mdMeta.status === 'active';
 
-        // Highlight active tab and scroll into view
+        // Highlight active tab
         container.querySelectorAll('.md-tab').forEach(btn => {
             btn.className = btn.dataset.mdid === mdId ? 'btn btn-gold md-tab' : 'btn btn-outline md-tab';
             if (btn.dataset.mdid === mdId) btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
         });
 
-        let lineup;
+        let lineupData;
         try {
-            lineup = await API.get(`/teams/${teamId}/matchday-lineup/${mdId}`);
+            lineupData = await API.get(`/teams/${teamId}/lineup-5/${mdId}`);
         } catch {
             area.innerHTML = '<div class="card text-center"><p style="color:var(--text-muted)">Error cargando alineación</p></div>';
             return;
         }
 
-        let starterIds = new Set(lineup.players.filter(p => p.is_starter).map(p => p.player_id));
-        let captainId = lineup.players.find(p => p.is_captain)?.player_id || '';
-        let viceCaptainId = lineup.players.find(p => p.is_vice_captain)?.player_id || '';
-
-        const playerMap = {};
-        lineup.players.forEach(p => { playerMap[p.player_id] = p; });
-
-        function getStarters() { return lineup.players.filter(p => starterIds.has(p.player_id)); }
-        function getBench() { return lineup.players.filter(p => !starterIds.has(p.player_id)); }
-        function getPositionCounts() {
-            const counts = {GK:0, DEF:0, MID:0, FWD:0};
-            starterIds.forEach(id => { const p = playerMap[id]; if (p) counts[p.position]++; });
-            return counts;
-        }
-        function getDetectedFormation() {
-            const c = getPositionCounts();
-            return `${c.DEF}-${c.MID}-${c.FWD}`;
-        }
-        function canAddPosition(pos) {
-            if (starterIds.size >= 11) return false;
-            return getPositionCounts()[pos] < POS_LIMITS[pos].max;
-        }
-
-        function validateGK() {
-            return getPositionCounts().GK >= 1;
-        }
-
-        const POS_LABELS_FULL = {GK: 'porteros', DEF: 'defensas', MID: 'centrocampistas', FWD: 'delanteros'};
-        function validateFormation() {
-            const c = getPositionCounts();
-            for (const pos of ['GK', 'DEF', 'MID', 'FWD']) {
-                if (c[pos] < POS_LIMITS[pos].min) {
-                    return { ok: false, message: `Mínimo ${POS_LIMITS[pos].min} ${POS_LABELS_FULL[pos]} (tienes ${c[pos]})` };
-                }
-                if (c[pos] > POS_LIMITS[pos].max) {
-                    return { ok: false, message: `Máximo ${POS_LIMITS[pos].max} ${POS_LABELS_FULL[pos]} (tienes ${c[pos]})` };
-                }
-            }
-            return { ok: true };
-        }
-
-        function autoLineup() {
-            // Pick best 11: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD
-            // Sort by avg_points DESC, then market_value DESC as tiebreaker
-            const sortFn = (a, b) => (b.avg_points || 0) - (a.avg_points || 0) || (b.market_value || 0) - (a.market_value || 0);
-            const available = lineup.players.filter(p => !p.locked);
-            const locked_starters = lineup.players.filter(p => p.locked && starterIds.has(p.player_id));
-
-            const byPos = {GK:[], DEF:[], MID:[], FWD:[]};
-            available.forEach(p => byPos[p.position]?.push(p));
-            Object.values(byPos).forEach(arr => arr.sort(sortFn));
-
-            // Start with locked starters (can't remove them)
-            const picks = new Set(locked_starters.map(p => p.player_id));
-            const posCounts = {GK:0, DEF:0, MID:0, FWD:0};
-            locked_starters.forEach(p => posCounts[p.position]++);
-
-            // Fill minimums first: 1 GK, 3 DEF, 2 MID, 1 FWD
-            const mins = {GK:1, DEF:3, MID:2, FWD:1};
-            for (const pos of ['GK','DEF','MID','FWD']) {
-                const need = mins[pos] - posCounts[pos];
-                for (let i = 0; i < need && byPos[pos].length; i++) {
-                    const p = byPos[pos].shift();
-                    picks.add(p.player_id);
-                    posCounts[pos]++;
-                }
-            }
-
-            // Fill remaining slots (11 - current) with best available respecting max limits
-            const remaining = [];
-            for (const pos of ['DEF','MID','FWD']) {
-                byPos[pos].forEach(p => remaining.push(p));
-            }
-            remaining.sort(sortFn);
-            for (const p of remaining) {
-                if (picks.size >= 11) break;
-                if (posCounts[p.position] < POS_LIMITS[p.position].max) {
-                    picks.add(p.player_id);
-                    posCounts[p.position]++;
-                }
-            }
-
-            starterIds = picks;
-            // Auto-captain: best avg_points starter
-            const starterList = lineup.players.filter(p => picks.has(p.player_id)).sort(sortFn);
-            if (starterList.length > 0) captainId = starterList[0].player_id;
-            if (starterList.length > 1) viceCaptainId = starterList[1].player_id;
-            render();
-        }
-
-        function renderChip(p, actions) {
-            const mdPts = p.matchday_points || 0;
-            const avgPts = p.avg_points || 0;
-            const totalPts = p.total_points || 0;
-            const locked = p.locked;
-            const mdIcons = [
-                p.matchday_goals > 0 ? `⚽×${p.matchday_goals}` : '',
-                p.matchday_assists > 0 ? `🅰️×${p.matchday_assists}` : '',
-                p.matchday_yellow_cards > 0 ? '🟨' : '',
-                p.matchday_red_card > 0 ? '🟥' : '',
-            ].filter(Boolean).join(' ');
+        let currentLineup = { ...lineupData.starters };  // {GK: {...}, DEF: {...}, ...}
+        const bench = lineupData.bench || [];
+        
+        function renderLineupEditor() {
+            const slotOptions = {};
+            LINEUP_SLOTS.forEach(slot => {
+                slotOptions[slot] = [];
+                bench.forEach(p => {
+                    if (slot === 'WILDCARD' || p.position === slot) {
+                        slotOptions[slot].push(p);
+                    }
+                });
+            });
+            
             return `
-                <div class="player-chip" style="${locked ? 'opacity:.7;' : ''}">
-                    <img src="${p.photo}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'">
-                    <div class="player-chip-info">
-                        <div class="player-name">
-                            ${p.player_id === captainId ? '<span class="chip-badge cap">C</span>' : ''}
-                            ${p.player_id === viceCaptainId ? '<span class="chip-badge vc">VC</span>' : ''}
-                            <a href="#/player/${p.player_id}" style="color:inherit;text-decoration:none" onclick="event.stopPropagation()">${p.name}</a> ${locked ? '🔒' : ''}
-                        </div>
-                        <div class="player-meta">${p.country_code} · ${p.club} ${mdIcons ? `· ${mdIcons}` : ''}</div>
-                    </div>
-                    ${posBadge(p.position)}
-                    <div style="text-align:right;min-width:40px;line-height:1.2">
-                        ${mdPts ? `<div style="font-weight:700;color:var(--accent-teal);font-size:.9rem">${mdPts}</div>` : ''}
-                        <div style="font-size:.7rem;color:var(--text-muted)">${avgPts > 0 ? `⌀${avgPts}` : ''}</div>
-                    </div>
-                    <div class="chip-actions">${actions}</div>
-                </div>`;
-        }
-
-        function renderPitch() {
-            const starters = getStarters();
-            const byPos = {GK:[], DEF:[], MID:[], FWD:[]};
-            starters.forEach(p => byPos[p.position]?.push(p));
-
-            function pitchPlayer(p) {
-                if (!p) return '<div class="pitch-player empty"><img src=""><div class="pitch-name">—</div></div>';
-                return `
-                    <div class="pitch-player">
-                        ${p.player_id === captainId ? '<span class="pitch-badge cap">C</span>' : ''}
-                        ${p.player_id === viceCaptainId ? '<span class="pitch-badge vc">VC</span>' : ''}
-                        <img src="${p.photo || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'">
-                        <div class="pitch-name">${p.name?.split(' ').pop() || ''}</div>
-                    </div>`;
-            }
-
-            // Rows: FWD at top, GK at bottom
-            return `
-                <div class="pitch">
-                    <div class="pitch-row">${byPos.FWD.map(p => pitchPlayer(p)).join('') || '<div class="pitch-player empty"><div class="pitch-name">FWD</div></div>'}</div>
-                    <div class="pitch-row">${byPos.MID.map(p => pitchPlayer(p)).join('') || '<div class="pitch-player empty"><div class="pitch-name">MID</div></div>'}</div>
-                    <div class="pitch-row">${byPos.DEF.map(p => pitchPlayer(p)).join('') || '<div class="pitch-player empty"><div class="pitch-name">DEF</div></div>'}</div>
-                    <div class="pitch-row">${byPos.GK.map(p => pitchPlayer(p)).join('') || '<div class="pitch-player empty"><div class="pitch-name">GK</div></div>'}</div>
-                </div>`;
-        }
-
-        function render() {
-            const starters = getStarters();
-            const bench = getBench().sort((a,b) => POS_ORDER[a.position] - POS_ORDER[b.position]);
-            const counts = getPositionCounts();
-
-            area.innerHTML = `
                 <div class="card mb-2">
-                    <div class="flex-between mb-1">
-                        <div class="card-header" style="margin:0">Formación: ${starterIds.size === 11 ? getDetectedFormation() : '—'}</div>
-                        <div style="font-size:.8rem;color:var(--text-muted)">
-                            ${Object.entries(POS_LIMITS).map(([pos, lim]) => {
-                                const c = counts[pos];
-                                const color = c === 0 ? 'var(--text-muted)' : (c >= lim.min && c <= lim.max) ? 'var(--accent-green)' : 'var(--accent-red)';
-                                return `<span style="color:${color}">${pos}:${c}</span>`;
-                            }).join(' ')}
+                    <div class="card-header">⚽ Alineación (5 jugadores)</div>
+                    <div class="lineup-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;padding:1rem">
+                        ${LINEUP_SLOTS.map(slot => {
+                            const currentPlayer = currentLineup[slot];
+                            const label = slot === 'WILDCARD' ? '🃏 Wildcard' : slot;
+                            return `
+                                <div class="slot-selector">
+                                    <label style="font-weight:600;font-size:.9rem">${label}</label>
+                                    <select class="slot-player" data-slot="${slot}" ${isActive ? 'disabled' : ''}>
+                                        <option value="">— Seleccionar —</option>
+                                        ${(slotOptions[slot] || [])
+                                            .map(p => `<option value="${p.player_id}" ${currentPlayer?.player_id === p.player_id ? 'selected' : ''}>
+                                                ${p.name} (${p.country_code}) ${p.country_played ? '🚫' : ''}
+                                            </option>`)
+                                            .join('')}
+                                    </select>
+                                    ${currentPlayer ? `<div style="font-size:.75rem;margin-top:.3rem;color:var(--text-muted)">${currentPlayer.name}</div>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    ${!isActive ? `<button class="btn btn-primary" id="btn-save-lineup-5">💾 Guardar alineación</button>` : ''}
+                </div>
+            `;
+        }
+        
+        function renderInGameSubs() {
+            if (!isActive) return '';
+            
+            const playedBench = bench.filter(p => p.matchday_minutes > 0);
+            const unplayedBench = bench.filter(p => p.matchday_minutes === 0);
+            
+            return `
+                <div class="card mb-2">
+                    <div class="card-header">🔄 Cambios en vivo</div>
+                    <div style="font-size:.85rem;color:var(--text-muted);margin-bottom:1rem">
+                        ✅ Saca: Jugador que YA HA JUGADO<br>
+                        ✅ Mete: Jugador que NO HA JUGADO
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:1rem;align-items:end">
+                        <div>
+                            <label style="font-size:.85rem">Sacar (ya ha jugado)</label>
+                            <select id="sub-out-player">
+                                <option value="">— Seleccionar —</option>
+                                ${Object.values(currentLineup).map(p => `
+                                    <option value="${p.player_id}" ${p.matchday_minutes > 0 ? '' : 'disabled'}>
+                                        ${p.name} (${p.matchday_minutes}min)
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <button class="btn btn-gold" style="padding:0.5rem 1rem">⇄</button>
+                        <div>
+                            <label style="font-size:.85rem">Meter (no ha jugado)</label>
+                            <select id="sub-in-player">
+                                <option value="">— Seleccionar —</option>
+                                ${unplayedBench.map(p => `
+                                    <option value="${p.player_id}">
+                                        ${p.name} (${p.country_code})
+                                    </option>
+                                `).join('')}
+                            </select>
                         </div>
                     </div>
-                    ${starterIds.size > 0 ? renderPitch() : ''}
+                    ${unplayedBench.length === 0 ? '<div style="margin-top:1rem;color:var(--accent-red);font-size:.85rem">⚠️ No hay jugadores sin jugar disponibles</div>' : ''}
+                    <button class="btn btn-gold mt-1" id="btn-perform-sub" ${unplayedBench.length === 0 ? 'disabled' : ''}>✅ Hacer cambio</button>
                 </div>
-
-                ${starterIds.size > 0 && !validateGK() ? '<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ Necesitas al menos 1 portero (GK) titular</div>' : ''}
-                ${!isCompleted && starterIds.size !== 11 ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ La alineación debe tener exactamente 11 titulares (tienes ${starterIds.size})</div>` : ''}
-                ${!isCompleted && starterIds.size === 11 && !validateFormation().ok ? `<div style="color:var(--accent-red);font-size:.85rem;margin-bottom:.5rem;text-align:center">⚠️ ${validateFormation().message}</div>` : ''}
-
-                <div class="grid grid-2">
-                    <div class="card">
-                        <div class="card-header">Titulares (${starterIds.size}/11)</div>
-                        ${['GK','DEF','MID','FWD'].map(pos => {
-                            const posPlayers = starters.filter(p => p.position === pos);
-                            if (!posPlayers.length) return '';
-                            return `
-                                <div class="pos-section"><small>${POS_LABELS[pos]} (${posPlayers.length})</small></div>
-                                ${posPlayers.map(p => {
-                                    // A played starter CAN be benched (loses points to free a slot for an unplayed bench player).
-                                    // Captain/VC are still locked once the player's match started.
-                                    const benchFrozen = isCompleted;
-                                    const capFrozen = p.locked || isCompleted;
-                                    return renderChip(p, `
-                                    <button class="btn btn-sm btn-outline bench-btn" data-pid="${p.player_id}" title="${benchFrozen ? 'Bloqueado' : (p.locked ? 'Al banquillo (perderá puntos)' : 'Al banquillo')}"${benchFrozen ? ' disabled' : ''}>
-                                        ${benchFrozen ? '🔒' : '↓'}
-                                    </button>
-                                    <button class="btn btn-sm ${p.player_id === captainId ? 'btn-gold' : 'btn-outline'} cap-btn" data-pid="${p.player_id}" title="Capitán"${capFrozen ? ' disabled' : ''}>C</button>
-                                    <button class="btn btn-sm ${p.player_id === viceCaptainId ? 'btn-primary' : 'btn-outline'} vc-btn" data-pid="${p.player_id}" title="Vice" style="font-size:.7rem"${capFrozen ? ' disabled' : ''}>VC</button>
-                                    `);
-                                }).join('')}
-                            `;
-                        }).join('')}
-                    </div>
-                    <div class="card">
-                        <div class="card-header">Banquillo (${bench.length})</div>
-                        ${['GK','DEF','MID','FWD'].map(pos => {
-                            const posPlayers = bench.filter(p => p.position === pos);
-                            if (!posPlayers.length) return '';
-                            return `
-                                <div class="pos-section"><small>${POS_LABELS[pos]}</small></div>
-                                ${posPlayers.map(p => {
-                                    const frozen = p.locked || isCompleted;
-                                    const canPromote = canAddPosition(pos) && !frozen;
-                                    return renderChip(p, `
-                                        <button class="btn btn-sm ${canPromote ? 'btn-primary' : 'btn-outline'} start-btn" data-pid="${p.player_id}"
-                                            ${canPromote ? '' : 'disabled'}
-                                            title="${frozen ? 'Bloqueado' : !canAddPosition(pos) ? 'Posición llena' : 'Titular'}">
-                                            ${frozen ? '🔒' : '↑'}
-                                        </button>
-                                    `);
-                                }).join('')}
-                            `;
-                        }).join('')}
-                    </div>
-                </div>
-
-                ${isCompleted ? `
-                <div class="mt-1 text-center"><span style="color:var(--text-muted);font-size:.85rem">✅ Jornada completada — alineación bloqueada</span></div>
-                ` : `
-                <div class="mt-2 text-center" style="display:flex;gap:.5rem;justify-content:center">
-                    <button class="btn btn-outline" id="btn-auto-lineup">🤖 Auto-alineación</button>
-                    <button class="btn btn-gold" id="btn-save-md-lineup">💾 Guardar alineación</button>
-                </div>
-                `}
             `;
-
-            // Events
-            area.querySelectorAll('.bench-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    starterIds.delete(btn.dataset.pid);
-                    if (captainId === btn.dataset.pid) captainId = '';
-                    if (viceCaptainId === btn.dataset.pid) viceCaptainId = '';
-                    render();
-                });
-            });
-            area.querySelectorAll('.start-btn').forEach(btn => {
-                btn.addEventListener('click', () => { starterIds.add(btn.dataset.pid); render(); });
-            });
-            area.querySelectorAll('.cap-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    captainId = btn.dataset.pid;
-                    if (viceCaptainId === captainId) viceCaptainId = '';
-                    render();
-                });
-            });
-            area.querySelectorAll('.vc-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    viceCaptainId = btn.dataset.pid;
-                    if (captainId === viceCaptainId) captainId = '';
-                    render();
-                });
-            });
-            document.getElementById('btn-auto-lineup')?.addEventListener('click', () => {
-                autoLineup();
-                showToast('🤖 Alineación automática aplicada — guarda para confirmar', 'success');
-            });
-            document.getElementById('btn-save-md-lineup')?.addEventListener('click', async () => {
-                if (starterIds.size !== 11) {
-                    showToast(`⚠️ La alineación debe tener exactamente 11 titulares (tienes ${starterIds.size})`, 'error');
-                    return;
-                }
-                if (!validateGK()) {
-                    showToast('⚠️ Necesitas al menos 1 portero (GK) titular', 'error');
-                    return;
-                }
-                const formationCheck = validateFormation();
-                if (!formationCheck.ok) {
-                    showToast(`⚠️ ${formationCheck.message}`, 'error');
-                    return;
-                }
-                const payload = { starters: [...starterIds] };
-                if (captainId) payload.captain = captainId;
-                if (viceCaptainId) payload.vice_captain = viceCaptainId;
-                try {
-                    await API.patch(`/teams/${teamId}/matchday-lineup/${mdId}`, payload);
-                    showToast('✅ Alineación guardada', 'success');
-                } catch (err) { showToast(err.message, 'error'); }
-            });
         }
 
-        render();
+        area.innerHTML = renderLineupEditor() + renderInGameSubs();
+
+        // Event listeners for lineup editor
+        document.getElementById('btn-save-lineup-5')?.addEventListener('click', async () => {
+            const spec = {};
+            let valid = true;
+            LINEUP_SLOTS.forEach(slot => {
+                const select = document.querySelector(`.slot-player[data-slot="${slot}"]`);
+                const playerId = select?.value;
+                if (!playerId) {
+                    valid = false;
+                    showToast(`${slot} slot vacío`, 'error');
+                }
+                spec[slot] = playerId;
+            });
+            
+            if (!valid) return;
+            
+            try {
+                const result = await API.patch(`/teams/${teamId}/lineup-5/${mdId}`, spec);
+                showToast('✅ Alineación guardada', 'success');
+                loadMatchdayLineup(mdId);
+            } catch (err) {
+                showToast(`❌ ${err.message}`, 'error');
+            }
+        });
+
+        // Event listeners for in-game subs
+        document.getElementById('btn-perform-sub')?.addEventListener('click', async () => {
+            const outId = document.getElementById('sub-out-player').value;
+            const inId = document.getElementById('sub-in-player').value;
+            
+            if (!outId || !inId) {
+                showToast('Selecciona ambos jugadores', 'error');
+                return;
+            }
+            
+            try {
+                const result = await API.post(`/teams/${teamId}/matchday/${mdId}/in-game-sub`, {
+                    player_out_id: outId,
+                    player_in_id: inId
+                });
+                showToast(`✅ ${result.message}`, 'success');
+                loadMatchdayLineup(mdId);
+            } catch (err) {
+                showToast(`❌ ${err.message}`, 'error');
+            }
+        });
     }
 
     // Tab switching

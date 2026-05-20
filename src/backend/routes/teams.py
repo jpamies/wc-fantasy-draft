@@ -4,7 +4,7 @@ import logging
 import traceback
 from src.backend.database import get_db
 from src.backend.auth import get_current_team
-from src.backend.models import TeamOut, TeamPlayerOut, LineupUpdate
+from src.backend.models import TeamOut, TeamPlayerOut, LineupUpdate, LineupSpec5, InGameSubstitutionRequest
 
 router = APIRouter(prefix="/api/v1", tags=["teams"])
 logger = logging.getLogger("wc-fantasy.teams")
@@ -467,5 +467,233 @@ async def update_matchday_lineup(team_id: str, matchday_id: str, body: LineupUpd
             f"starters={body.starters} captain={body.captain} vice={body.vice_captain}\n{tb}"
         )
         raise HTTPException(500, f"Error guardando alineación: {type(e).__name__}: {e}")
+    finally:
+        await db.close()
+
+
+# --- NEW: 5-player lineup endpoints ---
+
+@router.get("/teams/{team_id}/lineup-5/{matchday_id}")
+async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depends(get_current_team)):
+    """Get 5-player lineup status for a matchday (before/during/after)."""
+    if auth["team_id"] != team_id:
+        raise HTTPException(403, "Not your team")
+    
+    from src.backend.services.lineup_service import get_played_countries, ensure_matchday_snapshot
+    
+    # Get played countries
+    played_countries = await get_played_countries(matchday_id)
+    matchday_started = len(played_countries) > 0
+    
+    # Ensure snapshot if started
+    if matchday_started:
+        await ensure_matchday_snapshot(team_id, matchday_id)
+    
+    db = await get_db()
+    try:
+        # Get lineup
+        lineup = await db.execute_fetchall(
+            """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain, ml.is_wildcard, ml.position_slot,
+                      p.name, p.country_code, p.position, p.photo, p.club,
+                      COALESCE(ms.total_points, 0) as matchday_points,
+                      COALESCE(ms.minutes_played, 0) as matchday_minutes
+               FROM matchday_lineups ml
+               JOIN players p ON ml.player_id = p.id
+               LEFT JOIN match_scores ms ON ms.player_id = ml.player_id AND ms.matchday_id = $1
+               WHERE ml.team_id=$2 AND ml.matchday_id=$3
+               ORDER BY ml.is_starter DESC, ml.position_slot""",
+            (matchday_id, team_id, matchday_id)
+        )
+        
+        if not lineup:
+            # Return empty structure for new matchday
+            return {
+                "matchday_id": matchday_id,
+                "started": False,
+                "played_countries": [],
+                "starters": {},
+                "bench": [],
+            }
+        
+        starters = {}
+        bench = []
+        for p in lineup:
+            p = dict(p)
+            country_played = p["country_code"] in played_countries
+            player_info = {
+                "player_id": p["player_id"],
+                "name": p["name"],
+                "country_code": p["country_code"],
+                "position": p["position"],
+                "photo": p["photo"],
+                "club": p["club"],
+                "matchday_points": p["matchday_points"],
+                "matchday_minutes": p["matchday_minutes"],
+                "country_played": country_played,
+            }
+            
+            if p["is_starter"]:
+                starters[p["position_slot"]] = player_info
+            else:
+                bench.append(player_info)
+        
+        return {
+            "matchday_id": matchday_id,
+            "started": matchday_started,
+            "played_countries": sorted(played_countries),
+            "starters": starters,
+            "bench": bench,
+        }
+    finally:
+        await db.close()
+
+
+@router.patch("/teams/{team_id}/lineup-5/{matchday_id}")
+async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, auth: dict = Depends(get_current_team)):
+    """Update 5-player lineup with validation.
+    
+    body = {
+        'GK': player_id,
+        'DEF': player_id,
+        'MID': player_id,
+        'FWD': player_id,
+        'WILDCARD': player_id
+    }
+    """
+    if auth["team_id"] != team_id:
+        raise HTTPException(403, "Not your team")
+    
+    from src.backend.services.lineup_service import (
+        validate_5_player_lineup, ensure_matchday_snapshot, get_played_countries
+    )
+    
+    # Validate lineup structure
+    is_valid, msg = await validate_5_player_lineup(team_id, body)
+    if not is_valid:
+        raise HTTPException(400, msg)
+    
+    # Check if matchday started
+    played_countries = await get_played_countries(matchday_id)
+    if played_countries:
+        raise HTTPException(400, "Cannot change lineup after matchday starts")
+    
+    db = await get_db()
+    try:
+        # Ensure matchday exists
+        await _ensure_matchday_exists(db, matchday_id)
+        await ensure_matchday_snapshot(team_id, matchday_id)
+        
+        # Clear current starters
+        await db.execute(
+            "UPDATE matchday_lineups SET is_starter=0, is_wildcard=0, position_slot=NULL WHERE team_id=$1 AND matchday_id=$2",
+            (team_id, matchday_id)
+        )
+        
+        # Insert new 5-player lineup
+        for slot, player_id in body.items():
+            is_wildcard = 1 if slot == "WILDCARD" else 0
+            await db.execute(
+                """UPDATE matchday_lineups SET is_starter=1, is_wildcard=$1, position_slot=$2 
+                   WHERE team_id=$3 AND matchday_id=$4 AND player_id=$5""",
+                (is_wildcard, slot, team_id, matchday_id, player_id)
+            )
+        
+        await db.commit()
+        return {"ok": True, "message": "Lineup saved"}
+    except Exception as e:
+        try:
+            await db.rollback()
+        except:
+            pass
+        logger.error(f"update_5_player_lineup failed: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, f"Error: {e}")
+    finally:
+        await db.close()
+
+
+@router.post("/teams/{team_id}/matchday/{matchday_id}/in-game-sub")
+async def perform_in_game_substitution(team_id: str, matchday_id: str, body: dict, auth: dict = Depends(get_current_team)):
+    """Perform mid-matchday substitution (swap played OUT ↔ unplayed IN).
+    
+    body = {
+        'player_out_id': str,   # Already played
+        'player_in_id': str     # Haven't played yet
+    }
+    
+    Rules:
+    ✅ player_out must have already played (minutes_played > 0)
+    ✅ player_in must NOT have played yet (minutes_played = 0 or no row)
+    ✅ Both players in team's current lineup
+    """
+    if auth["team_id"] != team_id:
+        raise HTTPException(403, "Not your team")
+    
+    from src.backend.services.lineup_service import can_perform_substitution
+    
+    player_out = body.get("player_out_id")
+    player_in = body.get("player_in_id")
+    
+    if not player_out or not player_in:
+        raise HTTPException(400, "Missing player_out_id or player_in_id")
+    
+    is_valid, msg = await can_perform_substitution(team_id, matchday_id, player_out, player_in)
+    if not is_valid:
+        raise HTTPException(400, msg)
+    
+    db = await get_db()
+    try:
+        # Get OUT slot info
+        out_slot = await db.execute_fetchall(
+            """SELECT position_slot, is_wildcard FROM matchday_lineups 
+               WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3 AND is_starter=1""",
+            (team_id, matchday_id, player_out)
+        )
+        
+        if not out_slot:
+            raise HTTPException(400, f"Player {player_out} not in current starters")
+        
+        slot_info = dict(out_slot[0])
+        out_slot_name = slot_info["position_slot"]
+        is_wildcard = slot_info["is_wildcard"]
+        
+        # Perform swap: OUT player to bench
+        await db.execute(
+            """UPDATE matchday_lineups SET is_starter=0, is_wildcard=0, position_slot=NULL 
+               WHERE team_id=$1 AND matchday_id=$2 AND player_id=$3""",
+            (team_id, matchday_id, player_out)
+        )
+        
+        # IN player to starter in same slot
+        await db.execute(
+            """UPDATE matchday_lineups SET is_starter=1, is_wildcard=$1, position_slot=$2 
+               WHERE team_id=$3 AND matchday_id=$4 AND player_id=$5""",
+            (is_wildcard, out_slot_name, team_id, matchday_id, player_in)
+        )
+        
+        # Log substitution
+        await db.execute(
+            """INSERT INTO in_game_substitutions (team_id, matchday_id, player_out_id, player_in_id, created_at)
+               VALUES ($1, $2, $3, $4, $5)""",
+            (team_id, matchday_id, player_out, player_in, datetime.now(timezone.utc).isoformat())
+        )
+        
+        await db.commit()
+        
+        logger.info(f"In-game sub: team {team_id} md {matchday_id}: {player_out} → bench, {player_in} → starter")
+        
+        return {
+            "ok": True,
+            "message": f"Substitution done",
+            "out": player_out,
+            "in": player_in,
+            "slot": out_slot_name,
+        }
+    except Exception as e:
+        try:
+            await db.rollback()
+        except:
+            pass
+        logger.error(f"perform_in_game_substitution failed: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, f"Error: {e}")
     finally:
         await db.close()

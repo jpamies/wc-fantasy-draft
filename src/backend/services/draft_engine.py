@@ -9,15 +9,17 @@ from src.backend.config import settings
 
 _use_simulator = bool(settings.SIMULATOR_API_URL)
 
-# Squad composition targets for autodraft
-SQUAD_TARGETS = {"GK": (2, 3), "DEF": (5, 8), "MID": (5, 8), "FWD": (5, 8)}  # (min, max)
-SQUAD_SIZE = 23
+# Squad composition targets for autodraft (12-player squad)
+SQUAD_TARGETS = {"GK": (1, 2), "DEF": (2, 4), "MID": (2, 4), "FWD": (1, 3)}  # (min, max)
+SQUAD_SIZE = 12
+LINEUP_SIZE = 5
+LINEUP_STRUCTURE = {"GK": 1, "DEF": 1, "MID": 1, "FWD": 1, "WILDCARD": 1}
 
 
 class DraftEngine:
 
     @staticmethod
-    def compute_snake_order(team_ids: list[str], total_rounds: int = 23) -> list[list[str]]:
+    def compute_snake_order(team_ids: list[str], total_rounds: int = 12) -> list[list[str]]:
         """Generate snake draft order: round 1 forward, round 2 reverse, etc."""
         order = []
         for r in range(total_rounds):
@@ -45,8 +47,8 @@ class DraftEngine:
             if len(teams) < 2:
                 return {"error": "Need at least 2 teams"}
 
-            team_ids = [t["id"] for t in teams]
-            random.shuffle(team_ids)
+            team_ids_list = [t["id"] for t in teams]
+            random.shuffle(team_ids_list)
 
             import uuid
             draft_id = f"draft-{uuid.uuid4().hex[:8]}"
@@ -59,11 +61,11 @@ class DraftEngine:
             await db.execute(
                 """INSERT INTO drafts (id, league_id, status, current_round, current_pick, pick_order, started_at)
                    VALUES ($1,$2,$3,$4,$5,$6,$7)""",
-                (draft_id, league_id, "in_progress", 1, 1, json.dumps(team_ids), now),
+                (draft_id, league_id, "in_progress", 1, 1, json.dumps(team_ids_list), now),
             )
             await db.execute("UPDATE leagues SET status='draft_in_progress' WHERE id=$1", (league_id,))
             await db.commit()
-            return {"draft_id": draft_id, "pick_order": team_ids}
+            return {"draft_id": draft_id, "pick_order": team_ids_list}
         finally:
             await db.close()
 

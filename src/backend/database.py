@@ -185,9 +185,21 @@ CREATE TABLE IF NOT EXISTS matchday_lineups (
     is_starter INTEGER DEFAULT 0,
     is_captain INTEGER DEFAULT 0,
     is_vice_captain INTEGER DEFAULT 0,
+    is_wildcard INTEGER DEFAULT 0,
+    position_slot TEXT CHECK(position_slot IN ('GK','DEF','MID','FWD','WILDCARD')),
     UNIQUE(team_id, matchday_id, player_id)
 );
 CREATE INDEX IF NOT EXISTS idx_matchday_lineups_team ON matchday_lineups(team_id, matchday_id);
+
+CREATE TABLE IF NOT EXISTS in_game_substitutions (
+    id SERIAL PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES fantasy_teams(id) ON DELETE CASCADE,
+    matchday_id TEXT NOT NULL REFERENCES matchdays(id),
+    player_out_id TEXT NOT NULL REFERENCES players(id),
+    player_in_id TEXT NOT NULL REFERENCES players(id),
+    minutes_when_made INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
 
 CREATE TABLE IF NOT EXISTS draft_settings (
     id SERIAL PRIMARY KEY,

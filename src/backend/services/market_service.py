@@ -887,19 +887,14 @@ class MarketService:
                 return {"success": False, "reason": "Seller reached maximum sells limit"}
 
             # Check buyer's squad hasn't reached the size/position limits.
-            # Total max 23, position max: GK=3, DEF=8, MID=8, FWD=8 (mirrors draft engine).
-            POSITION_MAX = {"GK": 3, "DEF": 8, "MID": 8, "FWD": 8}
+            # Total max 12 (5 starters, 7 bench)
             counts_rows = await db.execute_fetchall(
-                """SELECT p.position, COUNT(*) as cnt
-                   FROM team_players tp JOIN players p ON tp.player_id = p.id
-                   WHERE tp.team_id = $1
-                   GROUP BY p.position""",
+                """SELECT COUNT(*)::int as cnt FROM team_players WHERE team_id=$1""",
                 (buyer_team_id,),
             )
-            counts = {r["position"]: r["cnt"] for r in counts_rows}
-            total = sum(counts.values())
-            if total >= 23:
-                return {"success": False, "reason": "Squad full (23 players)"}
+            total = counts_rows[0]["cnt"] if counts_rows else 0
+            if total >= 12:
+                return {"success": False, "reason": "Squad full (12 players)"}
             player_pos_row = await db.execute_fetchall(
                 "SELECT position FROM players WHERE id=$1", (player_id,)
             )
@@ -1009,8 +1004,8 @@ class MarketService:
                 "SELECT COUNT(*)::int as cnt FROM team_players WHERE team_id=$1",
                 (buyer_team_id,),
             )
-            if squad_rows and squad_rows[0]["cnt"] >= 23:
-                return {"success": False, "reason": "Squad full (23 players)"}
+            if squad_rows and squad_rows[0]["cnt"] >= 12:
+                return {"success": False, "reason": "Squad full (12 players)"}
 
             owner = await db.execute_fetchall(
                 """SELECT tp.team_id, ft.team_name
@@ -1409,13 +1404,13 @@ class MarketService:
                 "SELECT COUNT(*)::int as cnt FROM team_players WHERE team_id=$1",
                 (team_id,),
             )
-            if count_row and count_row[0]["cnt"] >= 23:
+            if count_row and count_row[0]["cnt"] >= 12:
                 await db.execute(
                     "UPDATE reposition_draft_picks SET is_pass=1 WHERE market_window_id=$1 AND team_id=$2 AND pick_number=$3",
                     (window_id, team_id, pick_number),
                 )
                 await db.commit()
-                return {"success": False, "reason": "Squad full (23 players)"}
+                return {"success": False, "reason": "Squad full (12 players)"}
 
             if player_id:
                 # Ensure full player data is in local DB (the row may be a stub
