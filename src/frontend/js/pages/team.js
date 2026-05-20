@@ -69,7 +69,6 @@ Router.register('#/team', async (container) => {
         if (!area) return;
 
         const mdMeta = matchdays.find(md => md.id === mdId) || {};
-        const isActive = mdMeta.status === 'active';
         const isLocked = mdMeta.status !== 'upcoming';
 
         container.querySelectorAll('.md-tab').forEach(btn => {
@@ -204,50 +203,6 @@ Router.register('#/team', async (container) => {
             return spec;
         };
 
-        const renderInGameSubs = () => {
-            if (!isActive) return '';
-            const starters = LINEUP_SLOTS.map(slot => currentLineup[slot]).filter(Boolean);
-            const starterIds = new Set(starters.map(p => p.player_id));
-            const bench = squadPlayers.filter(p => !starterIds.has(p.player_id));
-            const unplayedBench = bench.filter(p => (p.matchday_minutes || 0) === 0);
-
-            return `
-                <div class="card mb-2">
-                    <div class="card-header">Cambios en vivo</div>
-                    <div style="font-size:.85rem;color:var(--text-muted);margin-bottom:1rem">
-                        Sale: jugador que ya jugo. Entra: jugador que no ha jugado.
-                    </div>
-                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;align-items:end">
-                        <div>
-                            <label style="font-size:.85rem">Sacar</label>
-                            <select id="sub-out-player">
-                                <option value="">Seleccionar</option>
-                                ${starters.map(p => `
-                                    <option value="${p.player_id}" ${(p.matchday_minutes || 0) > 0 ? '' : 'disabled'}>
-                                        ${p.name} (${p.matchday_minutes || 0}min)
-                                    </option>
-                                `).join('')}
-                            </select>
-                        </div>
-                        <button class="btn btn-gold" style="padding:0.5rem 1rem;justify-self:center;min-width:56px">⇄</button>
-                        <div>
-                            <label style="font-size:.85rem">Meter</label>
-                            <select id="sub-in-player">
-                                <option value="">Seleccionar</option>
-                                ${unplayedBench.map(p => `
-                                    <option value="${p.player_id}">
-                                        ${p.name} (${p.country_code})
-                                    </option>
-                                `).join('')}
-                            </select>
-                        </div>
-                    </div>
-                    ${unplayedBench.length === 0 ? '<div style="margin-top:1rem;color:var(--accent-red);font-size:.85rem">No hay jugadores sin jugar disponibles</div>' : ''}
-                    <button class="btn btn-gold mt-1" id="btn-perform-sub" ${unplayedBench.length === 0 ? 'disabled' : ''}>Hacer cambio</button>
-                </div>
-            `;
-        };
-
         const render = () => {
             area.innerHTML = `
                 <div class="card mb-2">
@@ -284,6 +239,8 @@ Router.register('#/team', async (container) => {
                         ${squadPlayers.map(p => {
                             const inSlot = LINEUP_SLOTS.find(s => currentLineup[s]?.player_id === p.player_id);
                             const validSlots = LINEUP_SLOTS.filter(slot => slotAccepts(slot, p.position));
+                            const hasPlayed = (p.matchday_minutes || 0) > 0;
+                            const canAssignToLineup = !hasPlayed || !!inSlot;
                             return `
                                 <div style="display:grid;grid-template-columns:60px 1fr auto;gap:.75rem;align-items:center;padding:.5rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
                                     <div style="display:flex;flex-direction:column;align-items:center;gap:.3rem">
@@ -300,9 +257,10 @@ Router.register('#/team', async (container) => {
                                     </div>
                                     <div style="display:flex;flex-direction:column;gap:.35rem;align-items:flex-end">
                                         ${inSlot ? `<span class="badge badge-gold" style="font-size:.7rem">En ${inSlot}</span>` : ''}
+                                        ${!inSlot && hasPlayed ? `<span class="badge" style="font-size:.7rem;background:var(--border);color:var(--text-muted)">Ya jugo</span>` : ''}
                                         ${!isLocked ? `
                                             <div style="display:flex;gap:.25rem;flex-wrap:wrap;justify-content:flex-end">
-                                                ${validSlots.map(slot => `<button class="btn btn-xs ${inSlot === slot ? 'btn-gold' : 'btn-outline'} btn-place-player" data-pid="${p.player_id}" data-slot="${slot}" style="font-size:.7rem;padding:.3rem .4rem">${slot === 'WILDCARD' ? 'WC' : slot}</button>`).join('')}
+                                                ${canAssignToLineup ? validSlots.map(slot => `<button class="btn btn-xs ${inSlot === slot ? 'btn-gold' : 'btn-outline'} btn-place-player" data-pid="${p.player_id}" data-slot="${slot}" style="font-size:.7rem;padding:.3rem .4rem">${slot === 'WILDCARD' ? 'WC' : slot}</button>`).join('') : ''}
                                             </div>
                                         ` : ''}
                                     </div>
@@ -311,8 +269,6 @@ Router.register('#/team', async (container) => {
                         }).join('')}
                     </div>
                 </div>
-
-                ${renderInGameSubs()}
             `;
 
             if (!isLocked) {
@@ -343,24 +299,6 @@ Router.register('#/team', async (container) => {
                 });
             }
 
-            area.querySelector('#btn-perform-sub')?.addEventListener('click', async () => {
-                const outId = area.querySelector('#sub-out-player')?.value;
-                const inId = area.querySelector('#sub-in-player')?.value;
-                if (!outId || !inId) {
-                    showToast('Selecciona ambos jugadores', 'error');
-                    return;
-                }
-                try {
-                    const result = await API.post(`/teams/${teamId}/matchday/${mdId}/in-game-sub`, {
-                        player_out_id: outId,
-                        player_in_id: inId,
-                    });
-                    showToast(result.message || 'Cambio realizado', 'success');
-                    await loadMatchdayLineup(mdId);
-                } catch (err) {
-                    showToast(`Error: ${err.message}`, 'error');
-                }
-            });
         };
 
         render();
