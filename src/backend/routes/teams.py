@@ -481,22 +481,17 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
     
     from src.backend.services.lineup_service import get_played_countries, ensure_matchday_snapshot
     
-    # Get played countries
     played_countries = await get_played_countries(matchday_id)
     matchday_started = len(played_countries) > 0
-    
-    # Ensure snapshot if started
     if matchday_started:
         await ensure_matchday_snapshot(team_id, matchday_id)
     
     db = await get_db()
     try:
-        # Get lineup
         lineup = await db.execute_fetchall(
             """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain, ml.is_wildcard, ml.position_slot,
                       p.name, p.country_code, p.position, p.photo, p.club,
-                      COALESCE(ms.total_points, 0) as matchday_points,
-                      COALESCE(ms.minutes_played, 0) as matchday_minutes
+                      COALESCE(ms.total_points, 0) as matchday_points, COALESCE(ms.minutes_played, 0) as matchday_minutes
                FROM matchday_lineups ml
                JOIN players p ON ml.player_id = p.id
                LEFT JOIN match_scores ms ON ms.player_id = ml.player_id AND ms.matchday_id = $1
@@ -506,43 +501,39 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
         )
         
         if not lineup:
-            # Return empty structure for new matchday
             return {
-                "matchday_id": matchday_id,
-                "started": False,
-                "played_countries": [],
-                "starters": {},
-                "bench": [],
+                "matchday_id": matchday_id, "started": False, "played_countries": [],
+                "starters": {}, "bench": [], "captain_id": None, "vice_captain_id": None,
             }
         
         starters = {}
         bench = []
+        captain_id = None
+        vice_captain_id = None
+        
         for p in lineup:
             p = dict(p)
-            country_played = p["country_code"] in played_countries
             player_info = {
-                "player_id": p["player_id"],
-                "name": p["name"],
-                "country_code": p["country_code"],
-                "position": p["position"],
-                "photo": p["photo"],
-                "club": p["club"],
-                "matchday_points": p["matchday_points"],
-                "matchday_minutes": p["matchday_minutes"],
-                "country_played": country_played,
+                "player_id": p["player_id"], "name": p["name"], "country_code": p["country_code"],
+                "position": p["position"], "photo": p["photo"], "club": p["club"],
+                "matchday_points": p["matchday_points"], "matchday_minutes": p["matchday_minutes"],
+                "country_played": p["country_code"] in played_countries,
+                "is_captain": p["is_captain"], "is_vice_captain": p["is_vice_captain"],
             }
             
             if p["is_starter"]:
                 starters[p["position_slot"]] = player_info
+                if p["is_captain"]:
+                    captain_id = p["player_id"]
+                if p["is_vice_captain"]:
+                    vice_captain_id = p["player_id"]
             else:
                 bench.append(player_info)
         
         return {
-            "matchday_id": matchday_id,
-            "started": matchday_started,
-            "played_countries": sorted(played_countries),
-            "starters": starters,
-            "bench": bench,
+            "matchday_id": matchday_id, "started": matchday_started,
+            "played_countries": sorted(played_countries), "starters": starters,
+            "bench": bench, "captain_id": captain_id, "vice_captain_id": vice_captain_id,
         }
     finally:
         await db.close()
@@ -557,7 +548,9 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
         'DEF': player_id,
         'MID': player_id,
         'FWD': player_id,
-        'WILDCARD': player_id
+        'WILDCARD': player_id,
+        'captain_id': player_id (optional),
+        'vice_captain_id': player_id (optional)
     }
     """
     if auth["team_id"] != team_id:
@@ -566,6 +559,10 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
     from src.backend.services.lineup_service import (
         validate_5_player_lineup, ensure_matchday_snapshot, get_played_countries
     )
+    
+    # Extract captain info
+    captain_id = body.pop('captain_id', None)
+    vice_captain_id = body.pop('vice_captain_id', None)
     
     # Validate lineup structure
     is_valid, msg = await validate_5_player_lineup(team_id, body)
@@ -592,14 +589,16 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
         # Insert new 5-player lineup
         for slot, player_id in body.items():
             is_wildcard = 1 if slot == "WILDCARD" else 0
+            is_cap = 1 if player_id == captain_id else 0
+            is_vc = 1 if player_id == vice_captain_id else 0
             await db.execute(
-                """UPDATE matchday_lineups SET is_starter=1, is_wildcard=$1, position_slot=$2 
-                   WHERE team_id=$3 AND matchday_id=$4 AND player_id=$5""",
-                (is_wildcard, slot, team_id, matchday_id, player_id)
+                """UPDATE matchday_lineups SET is_starter=1, is_wildcard=$1, position_slot=$2, is_captain=$3, is_vice_captain=$4
+                   WHERE team_id=$5 AND matchday_id=$6 AND player_id=$7""",
+                (is_wildcard, slot, is_cap, is_vc, team_id, matchday_id, player_id)
             )
         
         await db.commit()
-        return {"ok": True, "message": "Lineup saved"}
+        return {"ok": True, "message": "Lineup saved", "captain_id": captain_id, "vice_captain_id": vice_captain_id}
     except Exception as e:
         try:
             await db.rollback()

@@ -123,7 +123,35 @@ Router.register('#/team', async (container) => {
                             `;
                         }).join('')}
                     </div>
-                    ${!isActive ? `<button class="btn btn-primary" id="btn-save-lineup-5">💾 Guardar alineación</button>` : ''}
+                    <div style="padding:0 1rem;margin-top:1rem">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                            <div>
+                                <label style="font-weight:600;font-size:.9rem">⚡ Capitán</label>
+                                <select id="select-captain" ${isActive ? 'disabled' : ''}>
+                                    <option value="">— Ninguno —</option>
+                                    ${Object.values(currentLineup)
+                                        .filter(p => p)
+                                        .map(p => `<option value="${p.player_id}" ${p.player_id === data.captain_id ? 'selected' : ''}>
+                                            ${p.name}
+                                        </option>`)
+                                        .join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600;font-size:.9rem">⚙️ Vice-Capitán</label>
+                                <select id="select-vice-captain" ${isActive ? 'disabled' : ''}>
+                                    <option value="">— Ninguno —</option>
+                                    ${Object.values(currentLineup)
+                                        .filter(p => p)
+                                        .map(p => `<option value="${p.player_id}" ${p.player_id === data.vice_captain_id ? 'selected' : ''}>
+                                            ${p.name}
+                                        </option>`)
+                                        .join('')}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    ${!isActive ? `<button class="btn btn-primary" id="btn-save-lineup-5" style="margin:1rem">💾 Guardar alineación</button>` : ''}
                 </div>
             `;
         }
@@ -189,6 +217,11 @@ Router.register('#/team', async (container) => {
             });
             
             if (!valid) return;
+            
+            const captainId = document.getElementById('select-captain').value || null;
+            const viceCaptainId = document.getElementById('select-vice-captain').value || null;
+            if (captainId) spec.captain_id = captainId;
+            if (viceCaptainId) spec.vice_captain_id = viceCaptainId;
             
             try {
                 const result = await API.patch(`/teams/${teamId}/lineup-5/${mdId}`, spec);
