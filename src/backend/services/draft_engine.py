@@ -93,11 +93,11 @@ class DraftEngine:
             total_teams = len(pick_order)
             current_round = draft["current_round"]
             current_pick = draft["current_pick"]
-            snake_order = DraftEngine.compute_snake_order(pick_order, 23)
+            snake_order = DraftEngine.compute_snake_order(pick_order, SQUAD_SIZE)
 
             current_team_id = None
             current_team_name = None
-            if draft["status"] == "in_progress" and current_round <= 23:
+            if draft["status"] == "in_progress" and current_round <= SQUAD_SIZE:
                 idx = current_pick - 1
                 if 0 <= idx < total_teams:
                     current_team_id = snake_order[current_round - 1][idx]
@@ -151,12 +151,12 @@ class DraftEngine:
 
             pick_order = json.loads(draft["pick_order"])
             total_teams = len(pick_order)
-            snake = DraftEngine.compute_snake_order(pick_order, 23)
+            snake = DraftEngine.compute_snake_order(pick_order, SQUAD_SIZE)
 
             current_round = draft["current_round"]
             current_pick = draft["current_pick"]
 
-            if current_round > 23:
+            if current_round > SQUAD_SIZE:
                 return {"error": "Draft completed"}
 
             expected_team = snake[current_round - 1][current_pick - 1]
@@ -195,7 +195,7 @@ class DraftEngine:
                 (team_id,),
             )
             squad_count = squad_count_rows[0]["cnt"] if squad_count_rows else 0
-            if max(current_count, squad_count) >= 23:
+            if max(current_count, squad_count) >= SQUAD_SIZE:
                 return {"error": "Team already full"}
 
             now = datetime.now(timezone.utc).isoformat()
@@ -217,7 +217,7 @@ class DraftEngine:
                 next_pick = 1
                 next_round = current_round + 1
 
-            if next_round > 23:
+            if next_round > SQUAD_SIZE:
                 # Draft complete
                 await db.execute(
                     "UPDATE drafts SET status='completed', current_round=$1, current_pick=$2, completed_at=$3 WHERE id=$4",

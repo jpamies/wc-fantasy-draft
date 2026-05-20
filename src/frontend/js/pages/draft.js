@@ -80,7 +80,7 @@ Router.register('#/draft', async (container) => {
 
         container.innerHTML = `
             <div class="flex-between mb-2">
-                <h2>🎯 Draft ${isDone ? '(Completado)' : `— Ronda ${state.current_round}/23`}</h2>
+                <h2>🎯 Draft ${isDone ? '(Completado)' : `— Ronda ${state.current_round}/12`}</h2>
                 <div class="flex" style="gap:.5rem;align-items:center">
                     <span class="status-dot ${wsConnected ? 'status-active' : 'status-pending'}"></span>
                     <span style="font-size:.75rem;color:var(--text-muted)">${wsConnected ? 'En vivo' : 'Polling'}</span>
@@ -91,7 +91,7 @@ Router.register('#/draft', async (container) => {
             <div class="draft-turn ${myTurn ? 'my-turn' : ''}">
                 <div style="font-size:.9rem;color:var(--text-secondary)">${myTurn ? '🔔 ¡ES TU TURNO!' : 'Esperando a:'}</div>
                 <div style="font-size:1.3rem;font-weight:700">${state.current_team_name || '...'}</div>
-                <div style="font-size:.85rem;color:var(--text-muted)">Pick ${state.current_pick} de ${state.pick_order.length} · Ronda ${state.current_round}/23</div>
+                <div style="font-size:.85rem;color:var(--text-muted)">Pick ${state.current_pick} de ${state.pick_order.length} · Ronda ${state.current_round}/12</div>
                 <div class="flex mt-1" style="justify-content:center;gap:.5rem">
                     ${myTurn ? '<button class="btn btn-outline btn-sm" id="btn-autopick">⚡ Auto-pick (1)</button>' : ''}
                     <button class="btn btn-sm ${autodraftEnabled ? 'btn-gold' : 'btn-outline'}" id="btn-autodraft">
@@ -168,7 +168,7 @@ Router.register('#/draft', async (container) => {
                         </div>
                     </div>
                     <div class="card">
-                        <div class="card-header">Mi equipo (${myPicks.length}/23)</div>
+                        <div class="card-header">Mi equipo (${myPicks.length}/12)</div>
                         ${['GK','DEF','MID','FWD'].map(pos => {
                             const pp = myPicks.filter(p => p.position === pos);
                             if (!pp.length) return '';
@@ -622,7 +622,7 @@ async function renderRepositionDraft(container, leagueId, windowId) {
                                     <span style="color:var(--text-muted)">P${o.pick_number}</span>
                                     <strong>${o.team_name}</strong>${o.team_id === teamId ? ' (TÚ)' : ''}
                                     <span style="color:var(--text-muted);font-size:.75rem;margin-left:auto">
-                                        ${o.players_count}/23
+                                        ${o.players_count}/12
                                     </span>
                                 </div>
                             `).join('')}
@@ -638,10 +638,10 @@ async function renderRepositionDraft(container, leagueId, windowId) {
                         ${myPicksCount === 0 ? '<p style="color:var(--text-muted);font-size:.85rem">Sin picks todavía</p>' : ''}
                     </div>
                     <div class="card">
-                        <div class="card-header">Mi plantilla (${(team.players || []).length}/23)</div>
+                        <div class="card-header">Mi plantilla (${(team.players || []).length}/12)</div>
                         ${['GK','DEF','MID','FWD'].map(pos => {
                             const pp = (team.players || []).filter(p => p.position === pos);
-                            const cap = {GK:3, DEF:8, MID:8, FWD:8}[pos];
+                            const cap = {GK:2, DEF:4, MID:4, FWD:3}[pos];
                             return `<div style="margin-bottom:.5rem">
                                 <small style="color:var(--text-muted)">${pos} (${pp.length}/${cap})</small>
                                 ${pp.map(p => `<div style="font-size:.78rem;padding:.1rem 0;display:flex;align-items:center;gap:.4rem">

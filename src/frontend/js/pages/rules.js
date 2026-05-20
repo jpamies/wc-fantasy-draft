@@ -73,7 +73,7 @@ Router.register('#/rules', async (container) => {
                         <li>El comisionado inicia el draft</li>
                         <li>Orden aleatorio + serpenteo (1→N, N→1)</li>
                         <li><strong>60 segundos</strong> por pick</li>
-                        <li>23 rondas hasta completar plantilla</li>
+                        <li>12 rondas hasta completar plantilla</li>
                         <li>Auto-pick si se agota el tiempo</li>
                     </ol>
                 </div>

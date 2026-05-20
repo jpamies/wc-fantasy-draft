@@ -143,8 +143,8 @@ Router.register('#/market/:windowId', async (container, params) => {
         const team = await API.get(`/teams/${teamId}`);
 
         // Squad composition limits (mirror backend draft rules)
-        const SQUAD_LIMITS = { GK: { min: 2, max: 3 }, DEF: { min: 5, max: 8 }, MID: { min: 5, max: 8 }, FWD: { min: 5, max: 8 } };
-        const SQUAD_MAX = 23;
+        const SQUAD_LIMITS = { GK: { min: 1, max: 2 }, DEF: { min: 2, max: 4 }, MID: { min: 2, max: 4 }, FWD: { min: 1, max: 3 } };
+        const SQUAD_MAX = 12;
         const counts = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
         (team.players || []).forEach(p => { if (counts[p.position] !== undefined) counts[p.position] += 1; });
         const total = counts.GK + counts.DEF + counts.MID + counts.FWD;
@@ -648,8 +648,8 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'mar
     const container = document.getElementById('available-players');
     const counts = window._marketSquadCounts || { GK: 0, DEF: 0, MID: 0, FWD: 0 };
     const total = window._marketSquadTotal ?? 0;
-    const limits = window._marketSquadLimits || { GK: { max: 3 }, DEF: { max: 8 }, MID: { max: 8 }, FWD: { max: 8 } };
-    const SQUAD_MAX = window._marketSquadMax ?? 23;
+    const limits = window._marketSquadLimits || { GK: { max: 2 }, DEF: { max: 4 }, MID: { max: 4 }, FWD: { max: 3 } };
+    const SQUAD_MAX = window._marketSquadMax ?? 12;
     const clauseAttempts = window._marketClauseAttempts || [];
     const maxClausulazos = window._marketClauseMax || 3;
     const remainingBudget = (window._marketBudget && window._marketBudget.remaining_budget) || 0;

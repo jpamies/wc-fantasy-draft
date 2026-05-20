@@ -57,7 +57,7 @@ cada jugador solo puede pertenecer a un equipo dentro de la liga.
 1. **Programación**: El comisionado fija fecha y hora del draft.
 2. **Orden**: Aleatorio o por serpenteo (1→N, N→1, 1→N...).
 3. **Turnos**: Cada participante tiene **60 segundos** para elegir un jugador.
-4. **Rondas**: 23 rondas hasta completar la plantilla de cada equipo.
+4. **Rondas**: 12 rondas hasta completar la plantilla de cada equipo.
 5. **Auto-pick**: Si el tiempo expira, se selecciona automáticamente según las preferencias del participante (posición prioritaria + mayor valor de mercado).
 
 ### Reglas del draft

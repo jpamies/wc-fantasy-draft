@@ -520,6 +520,47 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(team_id)"
         )
 
+        # Ensure lineup schema exists on pre-existing databases.
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS matchday_lineups (
+                id SERIAL PRIMARY KEY,
+                team_id TEXT NOT NULL REFERENCES fantasy_teams(id) ON DELETE CASCADE,
+                matchday_id TEXT NOT NULL REFERENCES matchdays(id),
+                player_id TEXT NOT NULL REFERENCES players(id),
+                is_starter INTEGER DEFAULT 0,
+                is_captain INTEGER DEFAULT 0,
+                is_vice_captain INTEGER DEFAULT 0,
+                is_wildcard INTEGER DEFAULT 0,
+                position_slot TEXT CHECK(position_slot IN ('GK','DEF','MID','FWD','WILDCARD')),
+                UNIQUE(team_id, matchday_id, player_id)
+            )
+            """
+        )
+        await conn.execute(
+            "ALTER TABLE matchday_lineups ADD COLUMN IF NOT EXISTS is_wildcard INTEGER DEFAULT 0"
+        )
+        await conn.execute(
+            "ALTER TABLE matchday_lineups ADD COLUMN IF NOT EXISTS position_slot TEXT"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_matchday_lineups_team ON matchday_lineups(team_id, matchday_id)"
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS in_game_substitutions (
+                id SERIAL PRIMARY KEY,
+                team_id TEXT NOT NULL REFERENCES fantasy_teams(id) ON DELETE CASCADE,
+                matchday_id TEXT NOT NULL REFERENCES matchdays(id),
+                player_out_id TEXT NOT NULL REFERENCES players(id),
+                player_in_id TEXT NOT NULL REFERENCES players(id),
+                minutes_when_made INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
+            )
+            """
+        )
+
         # Ensure league-scoped foreign keys use robust delete policies on existing DBs.
         await conn.execute(
             """

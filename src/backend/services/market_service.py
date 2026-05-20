@@ -1173,8 +1173,8 @@ class MarketService:
                    ORDER BY mb.remaining_budget DESC""",
                 (window_id,),
             )
-            # Teams already at 23 do not participate in reposition draft.
-            return [dict(o) for o in order if (o.get("players_count") or 0) < 23]
+            # Teams already at 12 do not participate in reposition draft.
+            return [dict(o) for o in order if (o.get("players_count") or 0) < 12]
         except Exception as e:
             logger.error(f"Error calculating reposition draft order: {e}")
             raise
@@ -1459,14 +1459,14 @@ class MarketService:
                         (team_id, player_id, "free_market", datetime.now().isoformat(), window_id),
                     )
 
-                # If team still has <23 players, append a new pick row at end of queue
+                # If team still has <12 players, append a new pick row at end of queue
                 count_row = await db.execute_fetchall(
                     "SELECT COUNT(*) as cnt FROM team_players WHERE team_id=$1",
                     (team_id,),
                 )
                 player_count = count_row[0]["cnt"]
 
-                if player_count < 23:
+                if player_count < 12:
                     # Find max pick_number to append
                     max_row = await db.execute_fetchall(
                         "SELECT MAX(pick_number) as mx FROM reposition_draft_picks WHERE market_window_id=$1",

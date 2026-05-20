@@ -131,7 +131,7 @@ Router.register('#/team', async (container) => {
                                     <option value="">— Ninguno —</option>
                                     ${Object.values(currentLineup)
                                         .filter(p => p)
-                                        .map(p => `<option value="${p.player_id}" ${p.player_id === data.captain_id ? 'selected' : ''}>
+                                        .map(p => `<option value="${p.player_id}" ${p.player_id === lineupData.captain_id ? 'selected' : ''}>
                                             ${p.name}
                                         </option>`)
                                         .join('')}
@@ -143,7 +143,7 @@ Router.register('#/team', async (container) => {
                                     <option value="">— Ninguno —</option>
                                     ${Object.values(currentLineup)
                                         .filter(p => p)
-                                        .map(p => `<option value="${p.player_id}" ${p.player_id === data.vice_captain_id ? 'selected' : ''}>
+                                        .map(p => `<option value="${p.player_id}" ${p.player_id === lineupData.vice_captain_id ? 'selected' : ''}>
                                             ${p.name}
                                         </option>`)
                                         .join('')}
