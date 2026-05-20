@@ -87,6 +87,23 @@ Router.register('#/team', async (container) => {
 
         const startersFromApi = lineupData.starters || {};
         const squadMap = new Map();
+        (team.players || []).forEach(p => {
+            const playerId = p.player_id || p.id;
+            if (!playerId) return;
+            squadMap.set(playerId, {
+                player_id: playerId,
+                name: p.name,
+                position: p.position,
+                country_code: p.country_code,
+                photo: p.photo,
+                club: p.club,
+                market_value: p.market_value || 0,
+                total_points: p.total_points || 0,
+                matchday_points: p.matchday_points || 0,
+                matchday_minutes: p.matchday_minutes || 0,
+                country_played: p.country_played || false,
+            });
+        });
         Object.values(startersFromApi).forEach(p => {
             if (p && p.player_id) squadMap.set(p.player_id, p);
         });
@@ -103,7 +120,6 @@ Router.register('#/team', async (container) => {
         LINEUP_SLOTS.forEach(slot => {
             currentLineup[slot] = startersFromApi[slot] || null;
         });
-        let activeSlot = 'GK';
 
         const slotLabel = (slot) => (slot === 'WILDCARD' ? 'WILDCARD' : slot);
         const slotAccepts = (slot, pos) => slot === 'WILDCARD' || slot === pos;
@@ -113,6 +129,43 @@ Router.register('#/team', async (container) => {
                 if (currentLineup[s]?.player_id === player.player_id) currentLineup[s] = null;
             });
             currentLineup[slot] = player;
+        };
+
+        const playerScore = (player) => {
+            return Number(player.total_points || 0) * 1000000 + Number(player.market_value || 0);
+        };
+
+        const autoBuildLineup = () => {
+            const nextLineup = {};
+            const used = new Set();
+
+            const takeBest = (slot) => {
+                const candidates = squadPlayers
+                    .filter(player => !used.has(player.player_id) && slotAccepts(slot, player.position))
+                    .sort((left, right) => playerScore(right) - playerScore(left));
+                return candidates[0] || null;
+            };
+
+            ['GK', 'DEF', 'MID', 'FWD'].forEach(slot => {
+                const best = takeBest(slot);
+                if (best) {
+                    nextLineup[slot] = best;
+                    used.add(best.player_id);
+                }
+            });
+
+            const wildcard = squadPlayers
+                .filter(player => !used.has(player.player_id))
+                .sort((left, right) => playerScore(right) - playerScore(left))[0] || null;
+
+            if (wildcard) {
+                nextLineup.WILDCARD = wildcard;
+                used.add(wildcard.player_id);
+            }
+
+            LINEUP_SLOTS.forEach(slot => {
+                currentLineup[slot] = nextLineup[slot] || null;
+            });
         };
 
         const buildSpec = () => {
@@ -141,7 +194,7 @@ Router.register('#/team', async (container) => {
                     <div style="font-size:.85rem;color:var(--text-muted);margin-bottom:1rem">
                         Sale: jugador que ya jugo. Entra: jugador que no ha jugado.
                     </div>
-                    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:1rem;align-items:end">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;align-items:end">
                         <div>
                             <label style="font-size:.85rem">Sacar</label>
                             <select id="sub-out-player">
@@ -153,7 +206,7 @@ Router.register('#/team', async (container) => {
                                 `).join('')}
                             </select>
                         </div>
-                        <button class="btn btn-gold" style="padding:0.5rem 1rem">⇄</button>
+                        <button class="btn btn-gold" style="padding:0.5rem 1rem;justify-self:center;min-width:56px">⇄</button>
                         <div>
                             <label style="font-size:.85rem">Meter</label>
                             <select id="sub-in-player">
@@ -178,17 +231,16 @@ Router.register('#/team', async (container) => {
                     <div class="card-header">Alineacion de jornada (5)</div>
                     <div style="font-size:.85rem;color:var(--text-muted);padding:0 1rem .8rem 1rem">
                         Obligatorio: 1 GK, 1 DEF, 1 MID, 1 FWD y 1 WILDCARD (cualquier posicion).
-                        ${isLocked ? ' La jornada esta bloqueada para editar.' : ' Selecciona un slot arriba y mete jugadores desde tu plantilla abajo.'}
+                        ${isLocked ? ' La jornada esta bloqueada para editar.' : ' Mete o quita titulares directamente desde tu plantilla.'}
                     </div>
-                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.75rem;padding:0 1rem 1rem 1rem">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem;padding:0 1rem 1rem 1rem">
                         ${LINEUP_SLOTS.map(slot => {
                             const p = currentLineup[slot];
-                            const selected = activeSlot === slot;
                             return `
-                                <div class="slot-card" data-slot="${slot}" style="border:2px solid ${selected ? 'var(--accent-gold)' : 'var(--border)'};border-radius:10px;padding:.6rem;cursor:${isLocked ? 'default' : 'pointer'};background:var(--bg-secondary)">
+                                <div class="slot-card" data-slot="${slot}" style="border:2px solid ${p ? 'var(--accent-gold)' : 'var(--border)'};border-radius:10px;padding:.6rem;background:var(--bg-secondary);min-width:0">
                                     <div style="font-weight:700;font-size:.85rem;margin-bottom:.4rem">${slotLabel(slot)}</div>
                                     ${p ? `
-                                        <div style="font-size:.85rem;line-height:1.2">${p.name}</div>
+                                        <div style="font-size:.85rem;line-height:1.2;overflow-wrap:anywhere">${p.name}</div>
                                         <div style="font-size:.75rem;color:var(--text-muted)">${p.position} · ${p.country_code}</div>
                                         ${!isLocked ? `<button class="btn btn-sm btn-outline btn-clear-slot" data-slot="${slot}" style="margin-top:.45rem">Quitar</button>` : ''}
                                     ` : `<div style="font-size:.8rem;color:var(--text-muted)">Vacio</div>`}
@@ -196,25 +248,28 @@ Router.register('#/team', async (container) => {
                             `;
                         }).join('')}
                     </div>
-                    ${!isLocked ? `<div style="padding:0 1rem 1rem 1rem"><button class="btn btn-primary" id="btn-save-lineup-5">Guardar alineacion</button></div>` : ''}
+                    ${!isLocked ? `<div style="padding:0 1rem 1rem 1rem;display:flex;gap:.6rem;flex-wrap:wrap"><button class="btn btn-outline" id="btn-auto-lineup-5">Auto alineacion</button><button class="btn btn-primary" id="btn-save-lineup-5">Guardar alineacion</button></div>` : ''}
                 </div>
 
                 <div class="card mb-2">
                     <div class="card-header">Tu plantilla (${squadPlayers.length}/${SQUAD_SIZE_MAX})</div>
                     <div style="padding:.75rem;display:grid;gap:.45rem">
                         ${squadPlayers.map(p => {
-                            const active = activeSlot;
-                            const canPlace = !!active && slotAccepts(active, p.position) && !isLocked;
                             const inSlot = LINEUP_SLOTS.find(s => currentLineup[s]?.player_id === p.player_id);
+                            const validSlots = LINEUP_SLOTS.filter(slot => slotAccepts(slot, p.position));
                             return `
-                                <div style="display:flex;align-items:center;gap:.6rem;padding:.45rem .5rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
+                                <div style="display:flex;align-items:center;gap:.6rem;padding:.45rem .5rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary);flex-wrap:wrap">
                                     ${posBadge(p.position)}
                                     <div style="flex:1;min-width:0">
                                         <div style="font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</div>
                                         <div style="font-size:.74rem;color:var(--text-muted)">${p.country_code} · ${p.position}</div>
                                     </div>
                                     ${inSlot ? `<span class="badge badge-gold" style="font-size:.72rem">En ${inSlot}</span>` : ''}
-                                    ${!isLocked ? `<button class="btn btn-sm ${canPlace ? 'btn-gold' : 'btn-outline'} btn-place-player" data-pid="${p.player_id}" ${canPlace ? '' : 'disabled'}>Meter en ${activeSlot}</button>` : ''}
+                                    ${!isLocked ? `
+                                        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-left:auto">
+                                            ${validSlots.map(slot => `<button class="btn btn-sm ${inSlot === slot ? 'btn-gold' : 'btn-outline'} btn-place-player" data-pid="${p.player_id}" data-slot="${slot}">${slot === 'WILDCARD' ? 'WC' : slot}</button>`).join('')}
+                                        </div>
+                                    ` : ''}
                                 </div>
                             `;
                         }).join('')}
@@ -225,13 +280,6 @@ Router.register('#/team', async (container) => {
             `;
 
             if (!isLocked) {
-                area.querySelectorAll('.slot-card').forEach(el => {
-                    el.addEventListener('click', () => {
-                        activeSlot = el.dataset.slot;
-                        render();
-                    });
-                });
-
                 area.querySelectorAll('.btn-clear-slot').forEach(el => {
                     el.addEventListener('click', (ev) => {
                         ev.stopPropagation();
@@ -243,11 +291,23 @@ Router.register('#/team', async (container) => {
                 area.querySelectorAll('.btn-place-player').forEach(el => {
                     el.addEventListener('click', () => {
                         const pid = el.dataset.pid;
+                        const slot = el.dataset.slot;
                         const player = squadPlayers.find(p => p.player_id === pid);
-                        if (!player || !slotAccepts(activeSlot, player.position)) return;
-                        assignPlayerToSlot(activeSlot, player);
+                        if (!player || !slotAccepts(slot, player.position)) return;
+                        assignPlayerToSlot(slot, player);
                         render();
                     });
+                });
+
+                area.querySelector('#btn-auto-lineup-5')?.addEventListener('click', () => {
+                    autoBuildLineup();
+                    const spec = buildSpec();
+                    if (!spec) {
+                        showToast('No se pudo generar una alineacion valida automaticamente', 'error');
+                        return;
+                    }
+                    showToast('Auto alineacion preparada', 'success');
+                    render();
                 });
 
                 area.querySelector('#btn-save-lineup-5')?.addEventListener('click', async () => {
