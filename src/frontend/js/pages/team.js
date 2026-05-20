@@ -233,16 +233,21 @@ Router.register('#/team', async (container) => {
                         Obligatorio: 1 GK, 1 DEF, 1 MID, 1 FWD y 1 WILDCARD (cualquier posicion).
                         ${isLocked ? ' La jornada esta bloqueada para editar.' : ' Mete o quita titulares directamente desde tu plantilla.'}
                     </div>
-                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem;padding:0 1rem 1rem 1rem">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;padding:0 1rem 1rem 1rem">
                         ${LINEUP_SLOTS.map(slot => {
                             const p = currentLineup[slot];
                             return `
                                 <div class="slot-card" data-slot="${slot}" style="border:2px solid ${p ? 'var(--accent-gold)' : 'var(--border)'};border-radius:10px;padding:.6rem;background:var(--bg-secondary);min-width:0">
                                     <div style="font-weight:700;font-size:.85rem;margin-bottom:.4rem">${slotLabel(slot)}</div>
                                     ${p ? `
-                                        <div style="font-size:.85rem;line-height:1.2;overflow-wrap:anywhere">${p.name}</div>
-                                        <div style="font-size:.75rem;color:var(--text-muted)">${p.position} · ${p.country_code}</div>
-                                        ${!isLocked ? `<button class="btn btn-sm btn-outline btn-clear-slot" data-slot="${slot}" style="margin-top:.45rem">Quitar</button>` : ''}
+                                        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:auto;border-radius:6px;margin-bottom:.4rem;aspect-ratio:1/1;object-fit:cover">` : ''}
+                                        <div style="font-size:.85rem;line-height:1.2;overflow-wrap:anywhere;font-weight:600">${p.name}</div>
+                                        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.3rem">${p.position} · ${p.country_code}</div>
+                                        <div style="display:flex;gap:.4rem;font-size:.75rem;margin-bottom:.4rem">
+                                            <div><span style="color:var(--text-muted)">J:</span> <span style="color:var(--accent-teal);font-weight:600">${p.matchday_points || 0}</span></div>
+                                            <div><span style="color:var(--text-muted)">Total:</span> <span style="color:var(--accent-gold);font-weight:600">${p.total_points || 0}</span></div>
+                                        </div>
+                                        ${!isLocked ? `<button class="btn btn-sm btn-outline btn-clear-slot" data-slot="${slot}" style="width:100%">Quitar</button>` : ''}
                                     ` : `<div style="font-size:.8rem;color:var(--text-muted)">Vacio</div>`}
                                 </div>
                             `;
@@ -253,23 +258,32 @@ Router.register('#/team', async (container) => {
 
                 <div class="card mb-2">
                     <div class="card-header">Tu plantilla (${squadPlayers.length}/${SQUAD_SIZE_MAX})</div>
-                    <div style="padding:.75rem;display:grid;gap:.45rem">
+                    <div style="padding:.75rem;display:grid;gap:.5rem">
                         ${squadPlayers.map(p => {
                             const inSlot = LINEUP_SLOTS.find(s => currentLineup[s]?.player_id === p.player_id);
                             const validSlots = LINEUP_SLOTS.filter(slot => slotAccepts(slot, p.position));
                             return `
-                                <div style="display:flex;align-items:center;gap:.6rem;padding:.45rem .5rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary);flex-wrap:wrap">
-                                    ${posBadge(p.position)}
-                                    <div style="flex:1;min-width:0">
-                                        <div style="font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</div>
-                                        <div style="font-size:.74rem;color:var(--text-muted)">${p.country_code} · ${p.position}</div>
+                                <div style="display:grid;grid-template-columns:60px 1fr auto;gap:.75rem;align-items:center;padding:.5rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
+                                    <div style="display:flex;flex-direction:column;align-items:center;gap:.3rem">
+                                        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:55px;height:55px;border-radius:6px;object-fit:cover">` : `<div style="width:55px;height:55px;border-radius:6px;background:var(--border);display:flex;align-items:center;justify-content:center">${posBadge(p.position)}</div>`}
+                                        ${posBadge(p.position)}
                                     </div>
-                                    ${inSlot ? `<span class="badge badge-gold" style="font-size:.72rem">En ${inSlot}</span>` : ''}
-                                    ${!isLocked ? `
-                                        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-left:auto">
-                                            ${validSlots.map(slot => `<button class="btn btn-sm ${inSlot === slot ? 'btn-gold' : 'btn-outline'} btn-place-player" data-pid="${p.player_id}" data-slot="${slot}">${slot === 'WILDCARD' ? 'WC' : slot}</button>`).join('')}
+                                    <div style="min-width:0">
+                                        <div style="font-size:.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</div>
+                                        <div style="font-size:.74rem;color:var(--text-muted)">${p.country_code} · ${p.market_value ? formatMoney(p.market_value) : 'N/A'}</div>
+                                        <div style="font-size:.72rem;margin-top:.2rem;display:flex;gap:.8rem">
+                                            <span><span style="color:var(--text-muted)">Jornada:</span> <span style="color:var(--accent-teal);font-weight:600">${p.matchday_points || 0}</span></span>
+                                            <span><span style="color:var(--text-muted)">Total:</span> <span style="color:var(--accent-gold);font-weight:600">${p.total_points || 0}</span></span>
                                         </div>
-                                    ` : ''}
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:.35rem;align-items:flex-end">
+                                        ${inSlot ? `<span class="badge badge-gold" style="font-size:.7rem">En ${inSlot}</span>` : ''}
+                                        ${!isLocked ? `
+                                            <div style="display:flex;gap:.25rem;flex-wrap:wrap;justify-content:flex-end">
+                                                ${validSlots.map(slot => `<button class="btn btn-xs ${inSlot === slot ? 'btn-gold' : 'btn-outline'} btn-place-player" data-pid="${p.player_id}" data-slot="${slot}" style="font-size:.7rem;padding:.3rem .4rem">${slot === 'WILDCARD' ? 'WC' : slot}</button>`).join('')}
+                                            </div>
+                                        ` : ''}
+                                    </div>
                                 </div>
                             `;
                         }).join('')}
