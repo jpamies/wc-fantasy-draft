@@ -124,11 +124,34 @@ Router.register('#/team', async (container) => {
         const slotLabel = (slot) => (slot === 'WILDCARD' ? 'WILDCARD' : slot);
         const slotAccepts = (slot, pos) => slot === 'WILDCARD' || slot === pos;
 
-        const assignPlayerToSlot = (slot, player) => {
+        const assignPlayerToSlot = async (slot, player) => {
+            const existing = currentLineup[slot];
+            
+            // Check if replacing a player who has already played
+            if (existing && (existing.matchday_points || 0) > 0) {
+                const confirmed = await new Promise(resolve => {
+                    const msg = `⚠️ ${existing.name} ya ha jugado y tiene ${existing.matchday_points} puntos.\n\n¿Seguro que quieres reemplazarlo y perder esos puntos?`;
+                    resolve(confirm(msg));
+                });
+                if (!confirmed) return;
+            }
+            
+            // Remove from other slots
             LINEUP_SLOTS.forEach(s => {
                 if (currentLineup[s]?.player_id === player.player_id) currentLineup[s] = null;
             });
             currentLineup[slot] = player;
+            
+            // Auto-save
+            const spec = buildSpec();
+            if (spec) {
+                try {
+                    await API.patch(`/teams/${teamId}/lineup-5/${mdId}`, spec);
+                } catch (err) {
+                    showToast(`Error guardando: ${err.message}`, 'error');
+                }
+            }
+            render();
         };
 
         const playerScore = (player) => {
@@ -247,13 +270,12 @@ Router.register('#/team', async (container) => {
                                             <div><span style="color:var(--text-muted)">J:</span> <span style="color:var(--accent-teal);font-weight:600">${p.matchday_points || 0}</span></div>
                                             <div><span style="color:var(--text-muted)">Total:</span> <span style="color:var(--accent-gold);font-weight:600">${p.total_points || 0}</span></div>
                                         </div>
-                                        ${!isLocked ? `<button class="btn btn-sm btn-outline btn-clear-slot" data-slot="${slot}" style="width:100%">Quitar</button>` : ''}
                                     ` : `<div style="font-size:.8rem;color:var(--text-muted)">Vacio</div>`}
                                 </div>
                             `;
                         }).join('')}
                     </div>
-                    ${!isLocked ? `<div style="padding:0 1rem 1rem 1rem;display:flex;gap:.6rem;flex-wrap:wrap"><button class="btn btn-outline" id="btn-auto-lineup-5">Auto alineacion</button><button class="btn btn-primary" id="btn-save-lineup-5">Guardar alineacion</button></div>` : ''}
+                    ${!isLocked ? `<div style="padding:0 1rem 1rem 1rem;display:flex;gap:.6rem;flex-wrap:wrap"><button class="btn btn-outline" id="btn-auto-lineup-5">Auto alineacion</button></div>` : ''}
                 </div>
 
                 <div class="card mb-2">
@@ -294,45 +316,26 @@ Router.register('#/team', async (container) => {
             `;
 
             if (!isLocked) {
-                area.querySelectorAll('.btn-clear-slot').forEach(el => {
-                    el.addEventListener('click', (ev) => {
-                        ev.stopPropagation();
-                        currentLineup[el.dataset.slot] = null;
-                        render();
-                    });
-                });
-
                 area.querySelectorAll('.btn-place-player').forEach(el => {
-                    el.addEventListener('click', () => {
+                    el.addEventListener('click', async () => {
                         const pid = el.dataset.pid;
                         const slot = el.dataset.slot;
                         const player = squadPlayers.find(p => p.player_id === pid);
                         if (!player || !slotAccepts(slot, player.position)) return;
-                        assignPlayerToSlot(slot, player);
-                        render();
+                        await assignPlayerToSlot(slot, player);
                     });
                 });
 
-                area.querySelector('#btn-auto-lineup-5')?.addEventListener('click', () => {
+                area.querySelector('#btn-auto-lineup-5')?.addEventListener('click', async () => {
                     autoBuildLineup();
                     const spec = buildSpec();
                     if (!spec) {
                         showToast('No se pudo generar una alineacion valida automaticamente', 'error');
                         return;
                     }
-                    showToast('Auto alineacion preparada', 'success');
-                    render();
-                });
-
-                area.querySelector('#btn-save-lineup-5')?.addEventListener('click', async () => {
-                    const spec = buildSpec();
-                    if (!spec) {
-                        showToast('Completa 5 slots validos (1 por posicion + wildcard)', 'error');
-                        return;
-                    }
                     try {
                         await API.patch(`/teams/${teamId}/lineup-5/${mdId}`, spec);
-                        showToast('Alineacion guardada', 'success');
+                        showToast('Auto alineacion guardada', 'success');
                         await loadMatchdayLineup(mdId);
                     } catch (err) {
                         showToast(`Error: ${err.message}`, 'error');
