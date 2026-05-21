@@ -33,12 +33,12 @@ Router.register('#/team', async (container) => {
                 <div style="font-size:1.5rem;font-weight:700">${team.players.length}/${SQUAD_SIZE_MAX}</div>
             </div>
             <div class="card text-center">
-                <div style="font-size:.85rem;color:var(--text-secondary)">Puntos totales</div>
-                <div style="font-size:1.5rem;font-weight:700;color:var(--accent-teal)">${team.total_points || 0}</div>
+                <div style="font-size:.85rem;color:var(--text-secondary)">Puntos jornada</div>
+                <div id="team-matchday-points" style="font-size:2rem;font-weight:800;color:var(--accent-gold)">0</div>
             </div>
             <div class="card text-center">
-                <div style="font-size:.85rem;color:var(--text-secondary)">Valor total</div>
-                <div class="player-value" style="font-size:1.2rem">${formatMoney(team.players.reduce((s,p) => s + p.market_value, 0))}</div>
+                <div style="font-size:.85rem;color:var(--text-secondary)">Puntos totales equipo</div>
+                <div id="team-total-points" style="font-size:1.5rem;font-weight:700;color:var(--accent-teal)">${team.total_points || 0}</div>
             </div>
         </div>
         ${matchdays.length > 0 ? `
@@ -119,6 +119,18 @@ Router.register('#/team', async (container) => {
         LINEUP_SLOTS.forEach(slot => {
             currentLineup[slot] = startersFromApi[slot] || null;
         });
+
+        const updateHeaderPoints = () => {
+            const mdPts = LINEUP_SLOTS.reduce((sum, slot) => {
+                const p = currentLineup[slot];
+                return sum + Number(p?.matchday_points || 0);
+            }, 0);
+            const mdEl = document.getElementById('team-matchday-points');
+            if (mdEl) mdEl.textContent = String(mdPts);
+
+            const totalEl = document.getElementById('team-total-points');
+            if (totalEl) totalEl.textContent = String(team.total_points || 0);
+        };
 
         const slotLabel = (slot) => (slot === 'WILDCARD' ? 'WILDCARD' : slot);
         const slotAccepts = (slot, pos) => slot === 'WILDCARD' || slot === pos;
@@ -279,6 +291,8 @@ Router.register('#/team', async (container) => {
                     </div>
                 </div>
             `;
+
+            updateHeaderPoints();
 
             if (!isLocked) {
                 area.querySelectorAll('.btn-place-player').forEach(el => {

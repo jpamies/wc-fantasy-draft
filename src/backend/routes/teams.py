@@ -491,10 +491,16 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
         lineup = await db.execute_fetchall(
             """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain, ml.is_wildcard, ml.position_slot,
                       p.name, p.country_code, p.position, p.photo, p.club,
-                      COALESCE(ms.total_points, 0) as matchday_points, COALESCE(ms.minutes_played, 0) as matchday_minutes
+                      COALESCE(ms.total_points, 0) as matchday_points, COALESCE(ms.minutes_played, 0) as matchday_minutes,
+                      COALESCE(pts_all.total_points, 0) as total_points
                FROM matchday_lineups ml
                JOIN players p ON ml.player_id = p.id
                LEFT JOIN match_scores ms ON ms.player_id = ml.player_id AND ms.matchday_id = $1
+               LEFT JOIN (
+                   SELECT player_id, SUM(total_points) as total_points
+                   FROM match_scores
+                   GROUP BY player_id
+               ) pts_all ON pts_all.player_id = ml.player_id
                WHERE ml.team_id=$2 AND ml.matchday_id=$3
                ORDER BY ml.is_starter DESC, ml.position_slot""",
             (matchday_id, team_id, matchday_id)
@@ -517,6 +523,7 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
                 "player_id": p["player_id"], "name": p["name"], "country_code": p["country_code"],
                 "position": p["position"], "photo": p["photo"], "club": p["club"],
                 "matchday_points": p["matchday_points"], "matchday_minutes": p["matchday_minutes"],
+                "total_points": p["total_points"],
                 "country_played": p["country_code"] in played_countries,
                 "is_captain": p["is_captain"], "is_vice_captain": p["is_vice_captain"],
             }
