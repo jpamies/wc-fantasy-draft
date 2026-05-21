@@ -610,21 +610,28 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
                 if p["country_code"] in played_countries:
                     raise HTTPException(409, f"No puedes titular a {p['name']}: su partido ya ha empezado")
         
-        # Clear current starters
+        # Clear current starters but keep the snapshot rows.
         await db.execute(
             "UPDATE matchday_lineups SET is_starter=0, is_wildcard=0, position_slot=NULL WHERE team_id=$1 AND matchday_id=$2",
-            (team_id, matchday_id)
+            (team_id, matchday_id),
         )
-        
-        # Insert new 5-player lineup
+
+        # Upsert the 5 selected slots so a missing snapshot row cannot silently drop the save.
         for slot, player_id in body.items():
             is_wildcard = 1 if slot == "WILDCARD" else 0
             is_cap = 1 if player_id == captain_id else 0
             is_vc = 1 if player_id == vice_captain_id else 0
             await db.execute(
-                """UPDATE matchday_lineups SET is_starter=1, is_wildcard=$1, position_slot=$2, is_captain=$3, is_vice_captain=$4
-                   WHERE team_id=$5 AND matchday_id=$6 AND player_id=$7""",
-                (is_wildcard, slot, is_cap, is_vc, team_id, matchday_id, player_id)
+                """INSERT INTO matchday_lineups
+                   (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain, is_wildcard, position_slot)
+                   VALUES ($1,$2,$3,1,$4,$5,$6,$7)
+                   ON CONFLICT(team_id, matchday_id, player_id) DO UPDATE SET
+                     is_starter=1,
+                     is_captain=excluded.is_captain,
+                     is_vice_captain=excluded.is_vice_captain,
+                     is_wildcard=excluded.is_wildcard,
+                     position_slot=excluded.position_slot""",
+                (team_id, matchday_id, player_id, is_cap, is_vc, is_wildcard, slot),
             )
         
         await db.commit()
