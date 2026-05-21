@@ -218,10 +218,14 @@ Router.register('#/team', async (container) => {
         const render = () => {
             area.innerHTML = `
                 <div class="card mb-2">
-                    <div class="card-header">Alineacion de jornada (5)</div>
-                    <div style="font-size:.85rem;color:var(--text-muted);padding:0 1rem .8rem 1rem">
-                        Obligatorio: 1 GK, 1 DEF, 1 MID, 1 FWD y 1 WILDCARD (cualquier posicion).
-                        ${isLocked ? ' La jornada finalizo y esta bloqueada para editar.' : ' Mete o quita titulares directamente desde tu plantilla (si un pais ya jugo, no puedes meter desde banquillo a ese jugador).'}
+                    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
+                        <span>Alineacion de jornada (5)</span>
+                        <button class="btn btn-outline btn-sm" id="btn-lineup-info" title="Ver reglas de alineacion" style="min-width:34px;padding:.2rem .55rem;font-weight:700">i</button>
+                    </div>
+                    <div id="lineup-info-panel" style="display:none;margin:.25rem 1rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);font-size:.83rem;color:var(--text-secondary)">
+                        <div style="font-weight:700;color:var(--text-primary);margin-bottom:.35rem">Reglas rapidas</div>
+                        <div>Obligatorio: 1 GK, 1 DEF, 1 MID, 1 FWD y 1 WILDCARD (cualquier posicion).</div>
+                        <div style="margin-top:.25rem">${isLocked ? 'Estado: la jornada finalizo y esta bloqueada para editar.' : 'Estado: puedes editar. Si un pais ya jugo, no puedes subir desde banquillo a ese jugador.'}</div>
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;padding:0 1rem 1rem 1rem">
                         ${LINEUP_SLOTS.map(slot => {
@@ -293,6 +297,12 @@ Router.register('#/team', async (container) => {
             `;
 
             updateHeaderPoints();
+
+            area.querySelector('#btn-lineup-info')?.addEventListener('click', () => {
+                const panel = area.querySelector('#lineup-info-panel');
+                if (!panel) return;
+                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            });
 
             if (!isLocked) {
                 area.querySelectorAll('.btn-place-player').forEach(el => {
