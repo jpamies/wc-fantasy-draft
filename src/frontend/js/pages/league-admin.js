@@ -80,7 +80,7 @@ Router.register('#/admin/market', async (container) => {
                     </button>
                 </div>
                 <p style="color:var(--text-muted);font-size:.85rem;margin-top:.5rem">
-                    Las alineaciones se aplican a los bots con 23 jugadores pero sin titulares (problema histórico).
+                    Las alineaciones se aplican a los bots con 12 jugadores y 5 titulares (problema histórico).
                     El forzado de fase ejecuta la transición ahora si el deadline ya pasó.
                 </p>
             </div>

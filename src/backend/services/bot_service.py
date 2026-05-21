@@ -117,26 +117,13 @@ async def enable_autodraft_for_bots(league_id: str):
 
 
 async def set_default_lineup_for_bot(team_id: str) -> bool:
-    """Pick 11 starters + captain/VC for a bot team and persist in team_players.
+    """Pick a 5-slot lineup (GK, DEF, MID, FWD, WILDCARD) for a bot team.
 
-    Tries common formations in order and uses the first one whose position counts
-    can be filled by the bot's drafted players (sorted by strength desc).
-    Falls back to best-11 by strength if no formation fits.
-
-    The scoring engine falls back to team_players when matchday_lineups doesn't
-    exist for a given matchday — so this alone is enough for bots to score.
+    The bot uses the same simplified lineup shape as human teams. We persist the
+    chosen starters both in team_players (default roster) and in any existing
+    matchday_lineups snapshots so scoring and lineup views stay in sync.
     """
     from src.backend.database import get_db
-
-    FORMATIONS = [
-        {"GK": 1, "DEF": 4, "MID": 3, "FWD": 3},
-        {"GK": 1, "DEF": 4, "MID": 4, "FWD": 2},
-        {"GK": 1, "DEF": 3, "MID": 4, "FWD": 3},
-        {"GK": 1, "DEF": 3, "MID": 5, "FWD": 2},
-        {"GK": 1, "DEF": 5, "MID": 3, "FWD": 2},
-        {"GK": 1, "DEF": 5, "MID": 4, "FWD": 1},
-        {"GK": 1, "DEF": 4, "MID": 5, "FWD": 1},
-    ]
 
     db = await get_db()
     try:
@@ -151,38 +138,44 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
             return False
 
         players = [dict(r) for r in rows]
-        by_pos = {"GK": [], "DEF": [], "MID": [], "FWD": []}
-        for p in players:
-            by_pos.setdefault(p["position"], []).append(p)
-        for arr in by_pos.values():
-            arr.sort(key=lambda x: x["market_value"], reverse=True)
+        remaining = players[:]
+        chosen = []
 
-        chosen = None
-        for f in FORMATIONS:
-            if all(len(by_pos.get(pos, [])) >= n for pos, n in f.items()):
-                picks = []
-                for pos, n in f.items():
-                    picks.extend(by_pos[pos][:n])
-                chosen = picks
-                break
+        def take_best(slot: str | None = None):
+            candidates = [p for p in remaining if slot is None or p["position"] == slot]
+            if not candidates and slot is not None:
+                candidates = remaining[:]
+            if not candidates:
+                return None
+            return max(candidates, key=lambda x: (int(x["market_value"] or 0), x["player_id"]))
 
-        if chosen is None:
-            all_sorted = sorted(players, key=lambda x: x["market_value"], reverse=True)
-            chosen = all_sorted[:11]
+        for slot in ["GK", "DEF", "MID", "FWD"]:
+            best = take_best(slot)
+            if best:
+                chosen.append({"player_id": best["player_id"], "slot": slot, "is_wildcard": 0})
+                remaining = [p for p in remaining if p["player_id"] != best["player_id"]]
+
+        wildcard = take_best(None)
+        if wildcard:
+            chosen.append({"player_id": wildcard["player_id"], "slot": "WILDCARD", "is_wildcard": 1})
+            remaining = [p for p in remaining if p["player_id"] != wildcard["player_id"]]
+
+        if len(chosen) != 5:
+            logger.warning(f"Bot team {team_id} could not build a full 5-slot lineup, got {len(chosen)} players")
 
         chosen_ids = {p["player_id"] for p in chosen}
-        sorted_starters = sorted(chosen, key=lambda x: x["market_value"], reverse=True)
+        sorted_starters = sorted(chosen, key=lambda x: next((int(p["market_value"] or 0) for p in players if p["player_id"] == x["player_id"]), 0), reverse=True)
         captain_id = sorted_starters[0]["player_id"] if sorted_starters else None
         vc_id = sorted_starters[1]["player_id"] if len(sorted_starters) > 1 else None
 
         await db.execute(
-            "UPDATE team_players SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=$1",
+            "UPDATE team_players SET is_starter=0, is_captain=0, is_vice_captain=0, position_slot=NULL WHERE team_id=$1",
             (team_id,),
         )
-        for pid in chosen_ids:
+        for item in chosen:
             await db.execute(
-                "UPDATE team_players SET is_starter=1 WHERE team_id=$1 AND player_id=$2",
-                (team_id, pid),
+                "UPDATE team_players SET is_starter=1, position_slot=$3 WHERE team_id=$1 AND player_id=$2",
+                (team_id, item["player_id"], item["slot"]),
             )
         if captain_id:
             await db.execute(
@@ -198,14 +191,13 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
         # Propagate to any existing matchday_lineups snapshots so past/active
         # matchdays score correctly when scoring engine prefers matchday_lineups.
         await db.execute(
-            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0 WHERE team_id=$1",
+            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0, is_wildcard=0, position_slot=NULL WHERE team_id=$1",
             (team_id,),
         )
-        if chosen_ids:
-            placeholders = ",".join(f"${i+2}" for i in range(len(chosen_ids)))
+        for item in chosen:
             await db.execute(
-                f"UPDATE matchday_lineups SET is_starter=1 WHERE team_id=$1 AND player_id IN ({placeholders})",
-                (team_id, *chosen_ids),
+                "UPDATE matchday_lineups SET is_starter=1, is_wildcard=$3, position_slot=$4 WHERE team_id=$1 AND player_id=$2",
+                (team_id, item["player_id"], item["is_wildcard"], item["slot"]),
             )
         if captain_id:
             await db.execute(
@@ -219,7 +211,7 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
             )
 
         await db.commit()
-        logger.info(f"Bot lineup set for team {team_id}: 11 starters, cap={captain_id}, vc={vc_id}")
+        logger.info(f"Bot lineup set for team {team_id}: 5 starters, cap={captain_id}, vc={vc_id}")
         return True
     finally:
         await db.close()
