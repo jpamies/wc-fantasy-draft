@@ -104,10 +104,16 @@ Router.register('#/team', async (container) => {
             });
         });
         Object.values(startersFromApi).forEach(p => {
-            if (p && p.player_id) squadMap.set(p.player_id, p);
+            if (p && p.player_id) {
+                const previous = squadMap.get(p.player_id) || {};
+                squadMap.set(p.player_id, { ...previous, ...p, total_points: previous.total_points ?? p.total_points ?? 0 });
+            }
         });
         (lineupData.bench || []).forEach(p => {
-            if (p && p.player_id) squadMap.set(p.player_id, p);
+            if (p && p.player_id) {
+                const previous = squadMap.get(p.player_id) || {};
+                squadMap.set(p.player_id, { ...previous, ...p, total_points: previous.total_points ?? p.total_points ?? 0 });
+            }
         });
         const squadPlayers = Array.from(squadMap.values()).sort((a, b) => {
             const p1 = POS_ORDER[a.position] ?? 99;
