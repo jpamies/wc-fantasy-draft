@@ -488,6 +488,35 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
     
     db = await get_db()
     try:
+        md_status_rows = await db.execute_fetchall(
+            "SELECT status FROM matchdays WHERE id=$1",
+            (matchday_id,),
+        )
+        md_status = md_status_rows[0]["status"] if md_status_rows else "upcoming"
+
+        # If the snapshot already exists but new players were added to team_players
+        # after it was created, backfill them as bench so they appear in the UI.
+        if md_status != "completed":
+            missing = await db.execute_fetchall(
+                """SELECT tp.player_id FROM team_players tp
+                   LEFT JOIN matchday_lineups ml
+                     ON ml.team_id = tp.team_id
+                    AND ml.matchday_id = $1
+                    AND ml.player_id = tp.player_id
+                   WHERE tp.team_id = $2 AND ml.player_id IS NULL""",
+                (matchday_id, team_id),
+            )
+            if missing:
+                for row in missing:
+                    await db.execute(
+                        """INSERT INTO matchday_lineups
+                           (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain, is_wildcard, position_slot)
+                           VALUES ($1,$2,$3,0,0,0,0,NULL)
+                           ON CONFLICT(team_id, matchday_id, player_id) DO NOTHING""",
+                        (team_id, matchday_id, row["player_id"]),
+                    )
+                await db.commit()
+
         lineup = await db.execute_fetchall(
             """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain, ml.is_wildcard, ml.position_slot,
                       p.name, p.country_code, p.position, p.photo, p.club,
