@@ -495,8 +495,8 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
         md_status = md_status_rows[0]["status"] if md_status_rows else "upcoming"
 
         # If the snapshot already exists but new players were added to team_players
-        # after it was created, backfill them as bench so they appear in the UI.
-        if md_status != "completed":
+        # after it was created, backfill them as bench only for upcoming matchdays.
+        if md_status == "upcoming":
             missing = await db.execute_fetchall(
                 """SELECT tp.player_id FROM team_players tp
                    LEFT JOIN matchday_lineups ml

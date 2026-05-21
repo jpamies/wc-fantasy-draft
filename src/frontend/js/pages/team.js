@@ -86,23 +86,28 @@ Router.register('#/team', async (container) => {
 
         const startersFromApi = lineupData.starters || {};
         const squadMap = new Map();
-        (team.players || []).forEach(p => {
-            const playerId = p.player_id || p.id;
-            if (!playerId) return;
-            squadMap.set(playerId, {
-                player_id: playerId,
-                name: p.name,
-                position: p.position,
-                country_code: p.country_code,
-                photo: p.photo,
-                club: p.club,
-                market_value: p.market_value || 0,
-                total_points: p.total_points || 0,
-                matchday_points: p.matchday_points || 0,
-                matchday_minutes: p.matchday_minutes || 0,
-                country_played: p.country_played || false,
+        const useCurrentSquad = mdMeta.status === 'upcoming';
+
+        if (useCurrentSquad) {
+            (team.players || []).forEach(p => {
+                const playerId = p.player_id || p.id;
+                if (!playerId) return;
+                squadMap.set(playerId, {
+                    player_id: playerId,
+                    name: p.name,
+                    position: p.position,
+                    country_code: p.country_code,
+                    photo: p.photo,
+                    club: p.club,
+                    market_value: p.market_value || 0,
+                    total_points: p.total_points || 0,
+                    matchday_points: p.matchday_points || 0,
+                    matchday_minutes: p.matchday_minutes || 0,
+                    country_played: p.country_played || false,
+                });
             });
-        });
+        }
+
         Object.values(startersFromApi).forEach(p => {
             if (p && p.player_id) {
                 const previous = squadMap.get(p.player_id) || {};
