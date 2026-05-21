@@ -69,7 +69,7 @@ Router.register('#/team', async (container) => {
         if (!area) return;
 
         const mdMeta = matchdays.find(md => md.id === mdId) || {};
-        const isLocked = mdMeta.status !== 'upcoming';
+        const isLocked = mdMeta.status === 'completed';
 
         container.querySelectorAll('.md-tab').forEach(btn => {
             btn.className = btn.dataset.mdid === mdId ? 'btn btn-gold md-tab' : 'btn btn-outline md-tab';
@@ -126,10 +126,10 @@ Router.register('#/team', async (container) => {
         const assignPlayerToSlot = async (slot, player) => {
             const existing = currentLineup[slot];
             
-            // Check if replacing a player who has already played
-            if (existing && (existing.matchday_points || 0) > 0) {
+            // Warn if replacing a starter whose country's match has already started
+            if (existing && existing.country_played) {
                 const confirmed = await new Promise(resolve => {
-                    const msg = `⚠️ ${existing.name} ya ha jugado y tiene ${existing.matchday_points} puntos.\n\n¿Seguro que quieres reemplazarlo y perder esos puntos?`;
+                    const msg = `⚠️ ${existing.name} ya ha jugado y lleva ${existing.matchday_points || 0} puntos.\n\n¿Seguro que quieres reemplazarlo y perder esos puntos?`;
                     resolve(confirm(msg));
                 });
                 if (!confirmed) return;
@@ -209,7 +209,7 @@ Router.register('#/team', async (container) => {
                     <div class="card-header">Alineacion de jornada (5)</div>
                     <div style="font-size:.85rem;color:var(--text-muted);padding:0 1rem .8rem 1rem">
                         Obligatorio: 1 GK, 1 DEF, 1 MID, 1 FWD y 1 WILDCARD (cualquier posicion).
-                        ${isLocked ? ' La jornada esta bloqueada para editar.' : ' Mete o quita titulares directamente desde tu plantilla.'}
+                        ${isLocked ? ' La jornada finalizo y esta bloqueada para editar.' : ' Mete o quita titulares directamente desde tu plantilla (si un pais ya jugo, no puedes meter desde banquillo a ese jugador).'}
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;padding:0 1rem 1rem 1rem">
                         ${LINEUP_SLOTS.map(slot => {
@@ -239,7 +239,7 @@ Router.register('#/team', async (container) => {
                         ${squadPlayers.map(p => {
                             const inSlot = LINEUP_SLOTS.find(s => currentLineup[s]?.player_id === p.player_id);
                             const validSlots = LINEUP_SLOTS.filter(slot => slotAccepts(slot, p.position));
-                            const hasPlayed = (p.matchday_minutes || 0) > 0;
+                            const hasPlayed = !!p.country_played;
                             const canAssignToLineup = !hasPlayed || !!inSlot;
                             return `
                                 <div style="display:grid;grid-template-columns:60px 1fr auto;gap:.75rem;align-items:center;padding:.5rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
@@ -259,7 +259,7 @@ Router.register('#/team', async (container) => {
                                             <div style="font-size:1.05rem;color:var(--accent-gold);font-weight:800">${p.total_points || 0}</div>
                                         </div>
                                         ${inSlot ? `<span class="badge badge-gold" style="font-size:.7rem">En ${inSlot}</span>` : ''}
-                                        ${!inSlot && hasPlayed ? `<span class="badge" style="font-size:.7rem;background:var(--border);color:var(--text-muted)">Ya jugo</span>` : ''}
+                                        ${hasPlayed ? `<span class="badge" style="font-size:.7rem;background:var(--border);color:var(--text-muted)">Ya jugo</span>` : ''}
                                         ${!isLocked ? `
                                             <div style="display:flex;gap:.25rem;flex-wrap:wrap;justify-content:flex-end">
                                                 ${canAssignToLineup ? validSlots.map(slot => `<button class="btn btn-xs ${inSlot === slot ? 'btn-gold' : 'btn-outline'} btn-place-player" data-pid="${p.player_id}" data-slot="${slot}" style="font-size:.7rem;padding:.3rem .4rem">${slot === 'WILDCARD' ? 'WC' : slot}</button>`).join('') : ''}

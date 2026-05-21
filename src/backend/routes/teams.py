@@ -569,16 +569,39 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
     if not is_valid:
         raise HTTPException(400, msg)
     
-    # Check if matchday started
-    played_countries = await get_played_countries(matchday_id)
-    if played_countries:
-        raise HTTPException(400, "Cannot change lineup after matchday starts")
-    
     db = await get_db()
     try:
         # Ensure matchday exists
         await _ensure_matchday_exists(db, matchday_id)
         await ensure_matchday_snapshot(team_id, matchday_id)
+
+        # Allow edits during active matchday, but not when completed.
+        md = await db.execute_fetchall("SELECT status FROM matchdays WHERE id=$1", (matchday_id,))
+        md_status = dict(md[0])["status"] if md else "upcoming"
+        if md_status == "completed":
+            raise HTTPException(409, "Cannot change lineup: matchday already completed")
+
+        played_countries = await get_played_countries(matchday_id)
+
+        # Fetch current starters to validate promotions from bench -> starter.
+        current_rows = await db.execute_fetchall(
+            "SELECT player_id, is_starter FROM matchday_lineups WHERE team_id=$1 AND matchday_id=$2",
+            (team_id, matchday_id),
+        )
+        current_starters = {dict(r)["player_id"] for r in current_rows if dict(r)["is_starter"]}
+        new_starters = set(body.values())
+        promoted = new_starters - current_starters
+
+        if promoted and played_countries:
+            placeholders = ",".join(f"${i+1}" for i in range(len(promoted)))
+            promoted_rows = await db.execute_fetchall(
+                f"SELECT id, name, country_code FROM players WHERE id IN ({placeholders})",
+                list(promoted),
+            )
+            for row in promoted_rows:
+                p = dict(row)
+                if p["country_code"] in played_countries:
+                    raise HTTPException(409, f"No puedes titular a {p['name']}: su partido ya ha empezado")
         
         # Clear current starters
         await db.execute(
