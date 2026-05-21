@@ -234,7 +234,7 @@ Router.register('#/team', async (container) => {
                                 <div class="slot-card" data-slot="${slot}" style="border:2px solid ${p ? 'var(--accent-gold)' : 'var(--border)'};border-radius:10px;padding:.6rem;background:var(--bg-secondary);min-width:0">
                                     <div style="font-weight:700;font-size:.85rem;margin-bottom:.4rem">${slotLabel(slot)}</div>
                                     ${p ? `
-                                        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:auto;border-radius:6px;margin-bottom:.4rem;aspect-ratio:1/1;object-fit:cover">` : ''}
+                                        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" class="player-profile-link" data-pid="${p.player_id}" title="Ver perfil de ${p.name}" style="width:100%;height:auto;border-radius:6px;margin-bottom:.4rem;aspect-ratio:1/1;object-fit:cover;cursor:pointer">` : ''}
                                         <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:.5rem">
                                             <div style="min-width:0">
                                                 <div style="font-size:.85rem;line-height:1.2;overflow-wrap:anywhere;font-weight:600">${p.name}</div>
@@ -267,7 +267,7 @@ Router.register('#/team', async (container) => {
                             return `
                                 <div style="display:grid;grid-template-columns:60px 1fr auto;gap:.75rem;align-items:center;padding:.5rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
                                     <div style="display:flex;flex-direction:column;align-items:center;gap:.3rem">
-                                        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:55px;height:55px;border-radius:6px;object-fit:cover">` : `<div style="width:55px;height:55px;border-radius:6px;background:var(--border);display:flex;align-items:center;justify-content:center">${posBadge(p.position)}</div>`}
+                                        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" class="player-profile-link" data-pid="${p.player_id}" title="Ver perfil de ${p.name}" style="width:55px;height:55px;border-radius:6px;object-fit:cover;cursor:pointer">` : `<div style="width:55px;height:55px;border-radius:6px;background:var(--border);display:flex;align-items:center;justify-content:center">${posBadge(p.position)}</div>`}
                                         ${posBadge(p.position)}
                                     </div>
                                     <div style="min-width:0">
@@ -297,6 +297,14 @@ Router.register('#/team', async (container) => {
             `;
 
             updateHeaderPoints();
+
+            area.querySelectorAll('.player-profile-link').forEach(el => {
+                el.addEventListener('click', () => {
+                    const pid = el.dataset.pid;
+                    if (!pid) return;
+                    location.hash = `#/player/${encodeURIComponent(pid)}`;
+                });
+            });
 
             area.querySelector('#btn-lineup-info')?.addEventListener('click', () => {
                 const panel = area.querySelector('#lineup-info-panel');
