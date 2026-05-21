@@ -219,11 +219,18 @@ Router.register('#/team', async (container) => {
                                     <div style="font-weight:700;font-size:.85rem;margin-bottom:.4rem">${slotLabel(slot)}</div>
                                     ${p ? `
                                         ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:auto;border-radius:6px;margin-bottom:.4rem;aspect-ratio:1/1;object-fit:cover">` : ''}
-                                        <div style="font-size:.85rem;line-height:1.2;overflow-wrap:anywhere;font-weight:600">${p.name}</div>
-                                        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.3rem">${p.position} · ${p.country_code}</div>
+                                        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:.5rem">
+                                            <div style="min-width:0">
+                                                <div style="font-size:.85rem;line-height:1.2;overflow-wrap:anywhere;font-weight:600">${p.name}</div>
+                                                <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.3rem">${p.position} · ${p.country_code}</div>
+                                            </div>
+                                            <div style="text-align:right;line-height:1">
+                                                <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.15rem">Jornada</div>
+                                                <div style="font-size:1.6rem;font-weight:800;color:${p.country_played ? '#2dd4bf' : 'var(--text-muted)'}">${p.country_played ? (p.matchday_points || 0) : '-'}</div>
+                                            </div>
+                                        </div>
                                         <div style="display:flex;gap:.4rem;font-size:.75rem;margin-bottom:.4rem">
-                                            <div><span style="color:var(--text-muted)">J:</span> <span style="color:var(--accent-teal);font-weight:600">${p.matchday_points || 0}</span></div>
-                                            <div><span style="color:var(--text-muted)">Total:</span> <span style="color:var(--accent-gold);font-weight:600">${p.total_points || 0}</span></div>
+                                            <div><span style="color:var(--text-muted)">Total:</span> <span style="color:var(--accent-gold);font-weight:700">${p.total_points || 0}</span></div>
                                         </div>
                                     ` : `<div style="font-size:.8rem;color:var(--text-muted)">Vacio</div>`}
                                 </div>
