@@ -42,7 +42,7 @@ Router.register('#/team', async (container) => {
             </div>
         </div>
         ${matchdays.length > 0 ? `
-        <div class="flex mb-2" id="md-tabs" style="gap:.4rem;border-bottom:2px solid var(--border);padding-bottom:.5rem;overflow-x:auto;flex-wrap:nowrap">
+        <div class="flex mb-2" id="md-tabs" style="gap:.4rem;border-bottom:2px solid var(--border);padding-bottom:.5rem;overflow-x:visible;flex-wrap:wrap">
             ${matchdays.map((md, i) => {
                 const icon = md.status === 'completed' ? '✅' : md.status === 'active' ? '🔴' : '📋';
                 const badgeClass = md.status === 'completed' ? 'badge-teal' : md.status === 'active' ? 'badge-gold' : '';
