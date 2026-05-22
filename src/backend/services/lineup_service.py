@@ -12,7 +12,7 @@ LINEUP_SIZE = 5
 
 async def validate_5_player_lineup(team_id: str, lineup_spec: dict) -> tuple[bool, str]:
     """
-    Validate a 5-player lineup structure:
+    Validate a (possibly partial) 5-slot lineup structure:
     {
         'GK': player_id,
         'DEF': player_id,
@@ -22,10 +22,10 @@ async def validate_5_player_lineup(team_id: str, lineup_spec: dict) -> tuple[boo
     }
     
     Rules:
-    1. Cada slot debe tener un jugador del equipo
+    1. Cada slot enviado debe tener un jugador del equipo
     2. El wildcard puede ser de cualquier posición
-    3. Ningún jugador duplicado entre slots
-    4. Los 4 slots normales deben respetar posición (GK=GK, DEF=DEF, etc.)
+    3. Ningún jugador duplicado entre slots enviados
+    4. Los slots normales enviados deben respetar posición (GK=GK, DEF=DEF, etc.)
     """
     db = await get_db()
     try:
@@ -37,8 +37,12 @@ async def validate_5_player_lineup(team_id: str, lineup_spec: dict) -> tuple[boo
             (team_id,),
         )
         
-        if len(players) < 5:
-            return False, f"Need min 5 players in squad (have {len(players)})"
+        if lineup_spec is None:
+            return False, "Lineup payload is required"
+
+        allowed_slots = set(LINEUP_STRUCTURE.keys())
+        if any(slot not in allowed_slots for slot in lineup_spec.keys()):
+            return False, f"Invalid lineup slot. Allowed: {sorted(allowed_slots)}"
         
         squad_map = {p["player_id"]: p["position"] for p in players}
         player_ids = set(lineup_spec.values())
@@ -47,8 +51,8 @@ async def validate_5_player_lineup(team_id: str, lineup_spec: dict) -> tuple[boo
         if not player_ids.issubset(set(squad_map.keys())):
             return False, "Some players not in your squad"
         
-        # Check no duplicates
-        if len(player_ids) != LINEUP_SIZE:
+        # Check no duplicates among submitted slots
+        if len(player_ids) != len(lineup_spec.values()):
             return False, "Duplicate players in lineup"
         
         # Validate position constraints

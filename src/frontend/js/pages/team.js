@@ -217,12 +217,12 @@ Router.register('#/team', async (container) => {
             const spec = {};
             for (const slot of LINEUP_SLOTS) {
                 const p = currentLineup[slot];
-                if (!p?.player_id) return null;
+                if (!p?.player_id) continue;
                 if (!slotAccepts(slot, p.position)) return null;
                 spec[slot] = p.player_id;
             }
             const unique = new Set(Object.values(spec));
-            if (unique.size !== LINEUP_SIZE) return null;
+            if (unique.size !== Object.keys(spec).length) return null;
             return spec;
         };
 
