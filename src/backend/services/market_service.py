@@ -9,6 +9,21 @@ from src.backend.database import get_db
 logger = logging.getLogger(__name__)
 
 
+def _normalize_position(pos: str | None) -> str | None:
+    if not pos:
+        return None
+    p = str(pos).strip().upper()
+    if p in ("GK", "GKP", "GOALKEEPER"):
+        return "GK"
+    if p in ("DEF", "DF", "D", "DEFENDER"):
+        return "DEF"
+    if p in ("MID", "MF", "M", "MIDFIELDER"):
+        return "MID"
+    if p in ("FWD", "FW", "ATT", "ST", "CF", "FORWARD", "STRIKER"):
+        return "FWD"
+    return p
+
+
 async def get_alive_country_codes() -> Optional[set]:
     """Return the set of country codes still in the tournament.
 
@@ -1435,19 +1450,22 @@ class MarketService:
                 )
                 if not player:
                     return {"success": False, "reason": "Player not found"}
-                player_pos = player[0]["position"]
+                player_pos = _normalize_position(player[0]["position"])
 
                 # Enforce position cap in reposition draft.
                 position_caps = {"GK": 4, "DEF": 4, "MID": 4, "FWD": 4}
                 if player_pos in position_caps:
-                    pos_count_rows = await db.execute_fetchall(
-                        """SELECT COUNT(*)::int as cnt
+                    team_pos_rows = await db.execute_fetchall(
+                        """SELECT p.position
                            FROM team_players tp
                            JOIN players p ON p.id = tp.player_id
-                           WHERE tp.team_id=$1 AND p.position=$2""",
-                        (team_id, player_pos),
+                           WHERE tp.team_id=$1""",
+                        (team_id,),
                     )
-                    pos_count = pos_count_rows[0]["cnt"] if pos_count_rows else 0
+                    pos_count = sum(
+                        1 for r in team_pos_rows
+                        if _normalize_position(r["position"]) == player_pos
+                    )
                     if pos_count >= position_caps[player_pos]:
                         return {
                             "success": False,

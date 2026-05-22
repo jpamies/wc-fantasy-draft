@@ -16,6 +16,21 @@ LINEUP_SIZE = 5
 LINEUP_STRUCTURE = {"GK": 1, "DEF": 1, "MID": 1, "FWD": 1, "WILDCARD": 1}
 
 
+def _normalize_position(pos: str | None) -> str | None:
+    if not pos:
+        return None
+    p = str(pos).strip().upper()
+    if p in ("GK", "GKP", "GOALKEEPER"):
+        return "GK"
+    if p in ("DEF", "DF", "D", "DEFENDER"):
+        return "DEF"
+    if p in ("MID", "MF", "M", "MIDFIELDER"):
+        return "MID"
+    if p in ("FWD", "FW", "ATT", "ST", "CF", "FORWARD", "STRIKER"):
+        return "FWD"
+    return p
+
+
 class DraftEngine:
 
     @staticmethod
@@ -209,11 +224,11 @@ class DraftEngine:
             )
             pos_counts = {"GK": 0, "DEF": 0, "MID": 0, "FWD": 0}
             for row in pos_rows:
-                pos = row["position"]
+                pos = _normalize_position(row["position"])
                 if pos in pos_counts:
                     pos_counts[pos] = row["cnt"]
 
-            player_pos = player.get("position")
+            player_pos = _normalize_position(player.get("position"))
             if player_pos in SQUAD_TARGETS:
                 pos_max = SQUAD_TARGETS[player_pos][1]
                 if pos_counts.get(player_pos, 0) >= pos_max:
