@@ -144,6 +144,8 @@ class ScoringEngine:
         """Calculate a team's points for a matchday, respecting league auto_substitutions setting."""
         db = await get_db()
         try:
+            valid_slots = {"GK", "DEF", "MID", "FWD", "WILDCARD"}
+
             # Get league auto_substitutions setting
             league_row = await db.execute_fetchall(
                 """SELECT l.auto_substitutions FROM fantasy_teams ft
@@ -156,7 +158,7 @@ class ScoringEngine:
             # Try matchday-specific lineup first, fall back to default
             roster = await db.execute_fetchall(
                 """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain,
-                          p.position
+                          ml.position_slot, ml.is_wildcard, p.position
                    FROM matchday_lineups ml JOIN players p ON ml.player_id = p.id
                    WHERE ml.team_id=$1 AND ml.matchday_id=$2""",
                 (team_id, matchday_id),
@@ -165,16 +167,53 @@ class ScoringEngine:
                 # Fall back to default team_players
                 roster = await db.execute_fetchall(
                     """SELECT tp.player_id, tp.is_starter, tp.is_captain, tp.is_vice_captain,
-                              p.position
+                              tp.position_slot, 0 as is_wildcard, p.position
                        FROM team_players tp JOIN players p ON tp.player_id = p.id
                        WHERE tp.team_id=$1""",
                     (team_id,),
                 )
-            starters = [dict(r) for r in roster if r["is_starter"]]
-            bench = [dict(r) for r in roster if not r["is_starter"]]
+
+            roster = [dict(r) for r in roster]
+
+            # Prefer explicit 5-slot starters when available. Some historical snapshots
+            # may still have many starters flagged without position_slot.
+            slot_starters = [
+                r for r in roster
+                if r.get("is_starter") and (
+                    (r.get("position_slot") in valid_slots)
+                    or bool(r.get("is_wildcard"))
+                )
+            ]
+
+            if len(slot_starters) == 5:
+                starter_ids = {r["player_id"] for r in slot_starters}
+                starters = slot_starters
+                bench = [r for r in roster if r["player_id"] not in starter_ids]
+            else:
+                # If matchday snapshot is malformed, try current team_players 5-slot lineup.
+                team_roster = await db.execute_fetchall(
+                    """SELECT tp.player_id, tp.is_starter, tp.is_captain, tp.is_vice_captain,
+                              tp.position_slot, 0 as is_wildcard, p.position
+                       FROM team_players tp JOIN players p ON tp.player_id = p.id
+                       WHERE tp.team_id=$1""",
+                    (team_id,),
+                )
+                team_roster = [dict(r) for r in team_roster]
+                team_slot_starters = [
+                    r for r in team_roster
+                    if r.get("is_starter") and (r.get("position_slot") in valid_slots)
+                ]
+                if len(team_slot_starters) == 5:
+                    starter_ids = {r["player_id"] for r in team_slot_starters}
+                    starters = team_slot_starters
+                    bench = [r for r in team_roster if r["player_id"] not in starter_ids]
+                else:
+                    # Legacy fallback behavior.
+                    starters = [r for r in roster if r.get("is_starter")]
+                    bench = [r for r in roster if not r.get("is_starter")]
 
             # Get scores for all team players this matchday
-            player_ids = [r["player_id"] for r in roster]
+            player_ids = [r["player_id"] for r in (starters + bench)]
             if not player_ids:
                 return 0
             placeholders = ",".join(f"${i+2}" for i in range(len(player_ids)))
