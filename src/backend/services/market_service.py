@@ -141,7 +141,8 @@ class MarketService:
                       ca.clause_amount_snapshot,
                       bt.team_name as buyer_team_name,
                       st.team_name as seller_team_name,
-                      p.name as player_name
+                      p.name as player_name,
+                      p.position as player_position
                FROM clause_attempts ca
                JOIN fantasy_teams bt ON bt.id = ca.buyer_team_id
                JOIN fantasy_teams st ON st.id = ca.expected_seller_team_id
@@ -187,6 +188,32 @@ class MarketService:
                 failure_reason = "player_already_taken"
             if not failure_reason and seller_done.get(current_seller, 0) >= max_per_team:
                 failure_reason = "seller_limit_reached"
+
+            # Enforce squad caps at RESOLUTION time (not submission time), because
+            # earlier attempts in the random order can change budget and roster shape.
+            if not failure_reason:
+                squad_rows = await db.execute_fetchall(
+                    "SELECT COUNT(*)::int as cnt FROM team_players WHERE team_id=$1",
+                    (buyer_team_id,),
+                )
+                squad_total = squad_rows[0]["cnt"] if squad_rows else 0
+                if squad_total >= 12:
+                    failure_reason = "squad_full"
+
+            if not failure_reason:
+                position_caps = {"GK": 4, "DEF": 4, "MID": 4, "FWD": 4}
+                player_pos = a.get("player_position")
+                if player_pos in position_caps:
+                    pos_rows = await db.execute_fetchall(
+                        """SELECT COUNT(*)::int as cnt
+                           FROM team_players tp
+                           JOIN players p ON p.id = tp.player_id
+                           WHERE tp.team_id=$1 AND p.position=$2""",
+                        (buyer_team_id, player_pos),
+                    )
+                    pos_count = pos_rows[0]["cnt"] if pos_rows else 0
+                    if pos_count >= position_caps[player_pos]:
+                        failure_reason = "position_cap_reached"
 
             clause_row = await db.execute_fetchall(
                 """SELECT clause_amount, is_blocked
@@ -999,36 +1026,6 @@ class MarketService:
             if submitted_count and submitted_count[0]["cnt"] >= max_clausulazos:
                 return {"success": False, "reason": f"Max clausulazos reached ({max_clausulazos})"}
 
-            # Check buyer squad size (cannot bid if already full).
-            squad_rows = await db.execute_fetchall(
-                "SELECT COUNT(*)::int as cnt FROM team_players WHERE team_id=$1",
-                (buyer_team_id,),
-            )
-            if squad_rows and squad_rows[0]["cnt"] >= 12:
-                return {"success": False, "reason": "Squad full (12 players)"}
-
-            # Enforce market position cap (max 4 for GK/DEF/MID/FWD).
-            pos_row = await db.execute_fetchall(
-                "SELECT position FROM players WHERE id=$1",
-                (player_id,),
-            )
-            player_pos = pos_row[0]["position"] if pos_row else None
-            position_caps = {"GK": 4, "DEF": 4, "MID": 4, "FWD": 4}
-            if player_pos in position_caps:
-                pos_count_rows = await db.execute_fetchall(
-                    """SELECT COUNT(*)::int as cnt
-                       FROM team_players tp
-                       JOIN players p ON p.id = tp.player_id
-                       WHERE tp.team_id=$1 AND p.position=$2""",
-                    (buyer_team_id, player_pos),
-                )
-                pos_count = pos_count_rows[0]["cnt"] if pos_count_rows else 0
-                if pos_count >= position_caps[player_pos]:
-                    return {
-                        "success": False,
-                        "reason": f"Position cap reached ({position_caps[player_pos]} {player_pos})",
-                    }
-
             owner = await db.execute_fetchall(
                 """SELECT tp.team_id, ft.team_name
                    FROM team_players tp
@@ -1057,21 +1054,8 @@ class MarketService:
             if clause_amount <= 0:
                 return {"success": False, "reason": "Player has no valid clause"}
 
-            # Enforce budget: amount of all pending attempts + this one must fit.
-            budget_row = await db.execute_fetchall(
-                "SELECT remaining_budget FROM market_budgets WHERE market_window_id=$1 AND team_id=$2",
-                (window_id, buyer_team_id),
-            )
-            remaining_budget = budget_row[0]["remaining_budget"] if budget_row else 0
-            pending_row = await db.execute_fetchall(
-                """SELECT COALESCE(SUM(clause_amount_snapshot),0)::int as total
-                   FROM clause_attempts
-                   WHERE market_window_id=$1 AND buyer_team_id=$2 AND status='pending'""",
-                (window_id, buyer_team_id),
-            )
-            pending_amount = pending_row[0]["total"] if pending_row else 0
-            if clause_amount + pending_amount > remaining_budget:
-                return {"success": False, "reason": "Insufficient budget for this clause attempt"}
+            # Do not pre-filter by pending-budget sum here. Attempts are resolved
+            # later in random order and budget is enforced then.
 
             try:
                 row = await db.execute_fetchall(

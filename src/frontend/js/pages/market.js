@@ -652,9 +652,7 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'mar
     const SQUAD_MAX = window._marketSquadMax ?? 12;
     const clauseAttempts = window._marketClauseAttempts || [];
     const maxClausulazos = window._marketClauseMax || 3;
-    const remainingBudget = (window._marketBudget && window._marketBudget.remaining_budget) || 0;
     const pendingAttempts = clauseAttempts.filter(a => a.status === 'pending');
-    const pendingAmount = pendingAttempts.reduce((acc, a) => acc + (a.clause_amount_snapshot || 0), 0);
 
     container.innerHTML = players.map(p => {
         const isOwn = p.current_team_id === teamId;
@@ -667,11 +665,9 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'mar
         let title = '';
         // Clausulazo/Oferta: comprobar presupuesto y límite de intentos
         let maxReached = false;
-        let insufficientBudget = false;
         let invalidClause = false;
         if (isClauseMode || isMarketOpen) {
             maxReached = pendingAttempts.length >= maxClausulazos;
-            insufficientBudget = (p.clause_amount + pendingAmount) > remainingBudget;
             invalidClause = !p.clause_amount || p.clause_amount <= 0;
         }
         if (isOwn) { label = 'Tuyo'; }
@@ -680,8 +676,7 @@ function renderAvailablePlayers(leagueId, teamId, windowId, players, mode = 'mar
         else if (positionFull) { label = `🚫 ${p.position} al máximo`; title = `${counts[p.position]}/${limits[p.position].max} en ${p.position}`; }
         else if (maxReached) { label = 'Máx. intentos'; title = `Has alcanzado el máximo de clausulazos (${maxClausulazos})`; }
         else if (invalidClause) { label = 'Sin cláusula'; title = 'Este jugador no tiene cláusula válida'; }
-        else if (insufficientBudget) { label = 'Sin presupuesto'; title = 'No tienes suficiente presupuesto para esta cláusula'; }
-        const disabled = isOwn || blocked || squadFull || positionFull || maxReached || invalidClause || insufficientBudget;
+        const disabled = isOwn || blocked || squadFull || positionFull || maxReached || invalidClause;
         return `
         <div class="player-card">
             <img src="${p.photo || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'" style="height:60px;width:auto">
