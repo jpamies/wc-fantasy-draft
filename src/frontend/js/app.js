@@ -21,6 +21,129 @@ window.clerkReady = (async function initClerk() {
 
 (async function() {
     const notificationPrefKey = 'wcf_browser_notifications_enabled';
+    const playerNotifStatePrefix = 'wcf_player_notif_state';
+    const activeMatchdayKey = 'wcf_notif_active_matchday';
+    const lineupWarningPrefix = 'wcf_notif_lineup_warning';
+    let playerNotifTimer = null;
+
+    function browserNotificationsEnabled() {
+        return supportsBrowserNotifications()
+            && getBrowserNotificationPermission() === 'granted'
+            && localStorage.getItem(notificationPrefKey) === 'true';
+    }
+
+    async function checkMyPlayersNotifications() {
+        if (!API.isLoggedIn() || !browserNotificationsEnabled()) return;
+
+        const teamId = API.getTeamId();
+        if (!teamId) return;
+
+        try {
+            const matchdays = await API.get('/scoring/matchdays');
+            const active = (matchdays || []).find(md => md.status === 'active');
+            const previousActiveId = localStorage.getItem(activeMatchdayKey);
+
+            if (active && previousActiveId !== active.id) {
+                notifyBrowser('WC Fantasy - jornada en directo', {
+                    body: `Ha comenzado ${active.name || active.id}`,
+                    tag: `matchday-start-${active.id}`,
+                    data: { type: 'matchday-start', matchday: active.id },
+                });
+            }
+
+            if (!active && previousActiveId) {
+                const previous = (matchdays || []).find(md => md.id === previousActiveId);
+                if (previous && previous.status === 'completed') {
+                    notifyBrowser('WC Fantasy - jornada finalizada', {
+                        body: `${previous.name || previous.id} ha terminado`,
+                        tag: `matchday-end-${previous.id}`,
+                        data: { type: 'matchday-end', matchday: previous.id },
+                    });
+                }
+            }
+
+            if (active) localStorage.setItem(activeMatchdayKey, active.id);
+            else localStorage.removeItem(activeMatchdayKey);
+
+            if (!active) return;
+
+            const lineup = await API.get(`/teams/${teamId}/lineup-5/${active.id}`);
+            const starters = Object.values(lineup.starters || {}).filter(Boolean);
+            const stateKey = `${playerNotifStatePrefix}:${teamId}:${active.id}`;
+            const warningKey = `${lineupWarningPrefix}:${teamId}:${active.id}`;
+
+            if (starters.length < 5 && localStorage.getItem(warningKey) !== '1') {
+                notifyBrowser('WC Fantasy - alineacion incompleta', {
+                    body: `Tienes ${starters.length}/5 titulares para ${active.name || active.id}`,
+                    tag: `lineup-incomplete-${active.id}`,
+                    data: { type: 'lineup-incomplete', matchday: active.id, starters: starters.length },
+                });
+                localStorage.setItem(warningKey, '1');
+            }
+
+            let previous = {};
+            try {
+                previous = JSON.parse(localStorage.getItem(stateKey) || '{}');
+            } catch {
+                previous = {};
+            }
+
+            // First observation for this matchday acts as baseline to avoid spam.
+            const hadPrevious = Object.keys(previous).length > 0;
+            const current = {};
+
+            for (const p of starters) {
+                const prev = previous[p.player_id];
+                const currPoints = Number(p.matchday_points || 0);
+                const currPlayed = Boolean(p.country_played);
+
+                current[p.player_id] = {
+                    matchday_points: currPoints,
+                    country_played: currPlayed,
+                    name: p.name || 'Jugador',
+                };
+
+                if (!hadPrevious || !prev) continue;
+
+                if (!prev.country_played && currPlayed) {
+                    notifyBrowser('WC Fantasy - jugador en juego', {
+                        body: `${p.name} ya ha empezado su partido`,
+                        tag: `player-live-${active.id}-${p.player_id}`,
+                        data: { type: 'player-live', matchday: active.id, player_id: p.player_id },
+                    });
+                }
+
+                const prevPoints = Number(prev.matchday_points || 0);
+                if (currPoints > prevPoints) {
+                    const delta = currPoints - prevPoints;
+                    notifyBrowser('WC Fantasy - puntos para tu equipo', {
+                        body: `${p.name}: +${delta} pts (total jornada: ${currPoints})`,
+                        tag: `player-points-${active.id}-${p.player_id}-${currPoints}`,
+                        data: { type: 'player-points', matchday: active.id, player_id: p.player_id, delta },
+                    });
+                } else if (currPoints < prevPoints) {
+                    const delta = currPoints - prevPoints;
+                    notifyBrowser('WC Fantasy - ajuste de puntos', {
+                        body: `${p.name}: ${delta} pts (total jornada: ${currPoints})`,
+                        tag: `player-points-adjust-${active.id}-${p.player_id}-${currPoints}`,
+                        data: { type: 'player-points-adjust', matchday: active.id, player_id: p.player_id, delta },
+                    });
+                }
+            }
+
+            localStorage.setItem(stateKey, JSON.stringify(current));
+        } catch (err) {
+            console.debug('Player notification poll failed:', err?.message || err);
+        }
+    }
+
+    function startPlayerNotificationMonitor() {
+        if (playerNotifTimer) return;
+
+        // Prime baseline quickly after login, then keep checking for live changes.
+        checkMyPlayersNotifications();
+        playerNotifTimer = setInterval(checkMyPlayersNotifications, 45000);
+    }
 
     async function loadRuntimeVersion() {
         const el = document.getElementById('app-version');
@@ -102,6 +225,7 @@ window.clerkReady = (async function initClerk() {
                     if (enabled) {
                         showToast('Notificaciones activadas en el navegador', 'success');
                         notifyBrowser('WC Fantasy', { body: 'Notificaciones activadas', tag: 'global-notifications' });
+                        checkMyPlayersNotifications();
                     } else if (permission === 'denied') {
                         showToast('Notificaciones bloqueadas por el navegador', 'error');
                     } else {
@@ -109,6 +233,8 @@ window.clerkReady = (async function initClerk() {
                     }
                 });
             }
+
+            startPlayerNotificationMonitor();
     }
 
     // Logout — sign out of both Clerk and our app
