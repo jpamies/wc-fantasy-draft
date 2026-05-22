@@ -166,7 +166,6 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
         chosen_ids = {p["player_id"] for p in chosen}
         sorted_starters = sorted(chosen, key=lambda x: next((int(p["market_value"] or 0) for p in players if p["player_id"] == x["player_id"]), 0), reverse=True)
         captain_id = sorted_starters[0]["player_id"] if sorted_starters else None
-        vc_id = sorted_starters[1]["player_id"] if len(sorted_starters) > 1 else None
 
         await db.execute(
             "UPDATE team_players SET is_starter=0, is_captain=0, is_vice_captain=0, position_slot=NULL WHERE team_id=$1",
@@ -181,11 +180,6 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
             await db.execute(
                 "UPDATE team_players SET is_captain=1 WHERE team_id=$1 AND player_id=$2",
                 (team_id, captain_id),
-            )
-        if vc_id:
-            await db.execute(
-                "UPDATE team_players SET is_vice_captain=1 WHERE team_id=$1 AND player_id=$2",
-                (team_id, vc_id),
             )
 
         # Propagate to any existing matchday_lineups snapshots so past/active
@@ -204,14 +198,9 @@ async def set_default_lineup_for_bot(team_id: str) -> bool:
                 "UPDATE matchday_lineups SET is_captain=1 WHERE team_id=$1 AND player_id=$2",
                 (team_id, captain_id),
             )
-        if vc_id:
-            await db.execute(
-                "UPDATE matchday_lineups SET is_vice_captain=1 WHERE team_id=$1 AND player_id=$2",
-                (team_id, vc_id),
-            )
 
         await db.commit()
-        logger.info(f"Bot lineup set for team {team_id}: 5 starters, cap={captain_id}, vc={vc_id}")
+        logger.info(f"Bot lineup set for team {team_id}: 5 starters, cap={captain_id}")
         return True
     finally:
         await db.close()
