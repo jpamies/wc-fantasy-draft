@@ -1007,6 +1007,28 @@ class MarketService:
             if squad_rows and squad_rows[0]["cnt"] >= 12:
                 return {"success": False, "reason": "Squad full (12 players)"}
 
+            # Enforce market position cap (max 4 for GK/DEF/MID/FWD).
+            pos_row = await db.execute_fetchall(
+                "SELECT position FROM players WHERE id=$1",
+                (player_id,),
+            )
+            player_pos = pos_row[0]["position"] if pos_row else None
+            position_caps = {"GK": 4, "DEF": 4, "MID": 4, "FWD": 4}
+            if player_pos in position_caps:
+                pos_count_rows = await db.execute_fetchall(
+                    """SELECT COUNT(*)::int as cnt
+                       FROM team_players tp
+                       JOIN players p ON p.id = tp.player_id
+                       WHERE tp.team_id=$1 AND p.position=$2""",
+                    (buyer_team_id, player_pos),
+                )
+                pos_count = pos_count_rows[0]["cnt"] if pos_count_rows else 0
+                if pos_count >= position_caps[player_pos]:
+                    return {
+                        "success": False,
+                        "reason": f"Position cap reached ({position_caps[player_pos]} {player_pos})",
+                    }
+
             owner = await db.execute_fetchall(
                 """SELECT tp.team_id, ft.team_name
                    FROM team_players tp
