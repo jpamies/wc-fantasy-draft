@@ -43,7 +43,7 @@ async def create_league(body: LeagueCreate):
             (league_id, body.name, code,
              s.max_teams or 10, s.initial_budget or 100000000,
              s.draft_timer_seconds or 60, s.max_clausulazos_per_window or 2,
-             1 if s.auto_substitutions is None else int(s.auto_substitutions),
+               0 if s.auto_substitutions is None else int(s.auto_substitutions),
              s.draft_order or "snake", s.captain_multiplier or 2.0, now),
         )
         await db.commit()
