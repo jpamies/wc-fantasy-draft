@@ -130,6 +130,7 @@ Router.register('#/team', async (container) => {
         LINEUP_SLOTS.forEach(slot => {
             currentLineup[slot] = startersFromApi[slot] || null;
         });
+        let currentCaptainId = lineupData.captain_id || null;
 
         const updateHeaderPoints = () => {
             const mdPts = LINEUP_SLOTS.reduce((sum, slot) => {
@@ -163,6 +164,12 @@ Router.register('#/team', async (container) => {
                 if (currentLineup[s]?.player_id === player.player_id) currentLineup[s] = null;
             });
             currentLineup[slot] = player;
+
+            // If current captain is no longer in the lineup, clear captaincy.
+            const lineupPlayerIds = new Set(LINEUP_SLOTS.map(s => currentLineup[s]?.player_id).filter(Boolean));
+            if (currentCaptainId && !lineupPlayerIds.has(currentCaptainId)) {
+                currentCaptainId = null;
+            }
             
             // Auto-save
             const spec = buildSpec();
@@ -171,6 +178,23 @@ Router.register('#/team', async (container) => {
                     await API.patch(`/teams/${teamId}/lineup-5/${mdId}`, spec);
                 } catch (err) {
                     showToast(`Error guardando: ${err.message}`, 'error');
+                }
+            }
+            render();
+        };
+
+        const toggleCaptain = async (playerId) => {
+            const lineupPlayerIds = new Set(LINEUP_SLOTS.map(s => currentLineup[s]?.player_id).filter(Boolean));
+            if (!lineupPlayerIds.has(playerId)) return;
+
+            currentCaptainId = currentCaptainId === playerId ? null : playerId;
+
+            const spec = buildSpec();
+            if (spec) {
+                try {
+                    await API.patch(`/teams/${teamId}/lineup-5/${mdId}`, spec);
+                } catch (err) {
+                    showToast(`Error guardando capitania: ${err.message}`, 'error');
                 }
             }
             render();
@@ -223,6 +247,9 @@ Router.register('#/team', async (container) => {
             }
             const unique = new Set(Object.values(spec));
             if (unique.size !== Object.keys(spec).length) return null;
+            if (currentCaptainId && unique.has(currentCaptainId)) {
+                spec.captain_id = currentCaptainId;
+            }
             return spec;
         };
 
@@ -236,6 +263,7 @@ Router.register('#/team', async (container) => {
                     <div id="lineup-info-panel" style="display:none;margin:.25rem 1rem .8rem 1rem;padding:.7rem .8rem;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);font-size:.83rem;color:var(--text-secondary)">
                         <div style="font-weight:700;color:var(--text-primary);margin-bottom:.35rem">Reglas rapidas</div>
                         <div>Obligatorio: 1 GK, 1 DEF, 1 MID, 1 FWD y 1 WILDCARD (cualquier posicion).</div>
+                        <div style="margin-top:.25rem">Capitan opcional: su puntuacion de jornada cuenta x2.</div>
                         <div style="margin-top:.25rem">${isLocked ? 'Estado: la jornada finalizo y esta bloqueada para editar.' : 'Estado: puedes editar. Si un pais ya jugo, no puedes subir desde banquillo a ese jugador.'}</div>
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;padding:0 1rem 1rem 1rem">
@@ -259,6 +287,7 @@ Router.register('#/team', async (container) => {
                                         <div style="display:flex;gap:.4rem;font-size:.75rem;margin-bottom:.4rem">
                                             <div><span style="color:var(--text-muted)">Total:</span> <span style="color:var(--accent-gold);font-weight:700">${p.total_points || 0}</span></div>
                                         </div>
+                                        ${!isLocked ? `<button class="btn btn-xs ${currentCaptainId === p.player_id ? 'btn-gold' : 'btn-outline'} btn-toggle-captain" data-pid="${p.player_id}" style="font-size:.7rem;padding:.28rem .45rem">${currentCaptainId === p.player_id ? 'Capitan' : 'Hacer capitan'}</button>` : ''}
                                     ` : `<div style="font-size:.8rem;color:var(--text-muted)">Vacio</div>`}
                                 </div>
                             `;
@@ -331,6 +360,14 @@ Router.register('#/team', async (container) => {
                         const player = squadPlayers.find(p => p.player_id === pid);
                         if (!player || !slotAccepts(slot, player.position)) return;
                         await assignPlayerToSlot(slot, player);
+                    });
+                });
+
+                area.querySelectorAll('.btn-toggle-captain').forEach(el => {
+                    el.addEventListener('click', async () => {
+                        const pid = el.dataset.pid;
+                        if (!pid) return;
+                        await toggleCaptain(pid);
                     });
                 });
 

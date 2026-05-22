@@ -518,7 +518,7 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
                 await db.commit()
 
         lineup = await db.execute_fetchall(
-            """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_vice_captain, ml.is_wildcard, ml.position_slot,
+            """SELECT ml.player_id, ml.is_starter, ml.is_captain, ml.is_wildcard, ml.position_slot,
                       p.name, p.country_code, p.position, p.photo, p.club,
                       COALESCE(ms.total_points, 0) as matchday_points, COALESCE(ms.minutes_played, 0) as matchday_minutes,
                       COALESCE(pts_all.total_points, 0) as total_points
@@ -544,7 +544,6 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
         starters = {}
         bench = []
         captain_id = None
-        vice_captain_id = None
         
         for p in lineup:
             p = dict(p)
@@ -554,22 +553,20 @@ async def get_5_player_lineup(team_id: str, matchday_id: str, auth: dict = Depen
                 "matchday_points": p["matchday_points"], "matchday_minutes": p["matchday_minutes"],
                 "total_points": p["total_points"],
                 "country_played": p["country_code"] in played_countries,
-                "is_captain": p["is_captain"], "is_vice_captain": p["is_vice_captain"],
+                "is_captain": p["is_captain"],
             }
             
             if p["is_starter"]:
                 starters[p["position_slot"]] = player_info
                 if p["is_captain"]:
                     captain_id = p["player_id"]
-                if p["is_vice_captain"]:
-                    vice_captain_id = p["player_id"]
             else:
                 bench.append(player_info)
         
         return {
             "matchday_id": matchday_id, "started": matchday_started,
             "played_countries": sorted(played_countries), "starters": starters,
-            "bench": bench, "captain_id": captain_id, "vice_captain_id": vice_captain_id,
+            "bench": bench, "captain_id": captain_id,
         }
     finally:
         await db.close()
@@ -586,7 +583,6 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
         'FWD': player_id,
         'WILDCARD': player_id,
         'captain_id': player_id (optional),
-        'vice_captain_id': player_id (optional)
     }
     """
     if auth["team_id"] != team_id:
@@ -598,7 +594,6 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
     
     # Extract captain info
     captain_id = body.pop('captain_id', None)
-    vice_captain_id = body.pop('vice_captain_id', None)
     
     # Validate lineup structure
     is_valid, msg = await validate_5_player_lineup(team_id, body)
@@ -641,7 +636,7 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
         
         # Clear current starters but keep the snapshot rows.
         await db.execute(
-            "UPDATE matchday_lineups SET is_starter=0, is_wildcard=0, position_slot=NULL WHERE team_id=$1 AND matchday_id=$2",
+            "UPDATE matchday_lineups SET is_starter=0, is_captain=0, is_vice_captain=0, is_wildcard=0, position_slot=NULL WHERE team_id=$1 AND matchday_id=$2",
             (team_id, matchday_id),
         )
 
@@ -649,22 +644,21 @@ async def update_5_player_lineup(team_id: str, matchday_id: str, body: dict, aut
         for slot, player_id in body.items():
             is_wildcard = 1 if slot == "WILDCARD" else 0
             is_cap = 1 if player_id == captain_id else 0
-            is_vc = 1 if player_id == vice_captain_id else 0
             await db.execute(
                 """INSERT INTO matchday_lineups
                    (team_id, matchday_id, player_id, is_starter, is_captain, is_vice_captain, is_wildcard, position_slot)
-                   VALUES ($1,$2,$3,1,$4,$5,$6,$7)
+                   VALUES ($1,$2,$3,1,$4,0,$5,$6)
                    ON CONFLICT(team_id, matchday_id, player_id) DO UPDATE SET
                      is_starter=1,
                      is_captain=excluded.is_captain,
-                     is_vice_captain=excluded.is_vice_captain,
+                     is_vice_captain=0,
                      is_wildcard=excluded.is_wildcard,
                      position_slot=excluded.position_slot""",
-                (team_id, matchday_id, player_id, is_cap, is_vc, is_wildcard, slot),
+                    (team_id, matchday_id, player_id, is_cap, is_wildcard, slot),
             )
-        
+
         await db.commit()
-        return {"ok": True, "message": "Lineup saved", "captain_id": captain_id, "vice_captain_id": vice_captain_id}
+        return {"ok": True, "message": "Lineup saved", "captain_id": captain_id}
     except Exception as e:
         try:
             await db.rollback()
