@@ -57,7 +57,6 @@ Router.register('#/standings', async (container) => {
                         <tr>
                             <th>#</th><th>Equipo</th><th>Manager</th>
                             <th style="text-align:right">${pointsLabel}</th>
-                            ${isGeneral ? '<th style="text-align:right">Presupuesto</th>' : ''}
                         </tr>
                     </thead>
                     <tbody>
@@ -71,10 +70,9 @@ Router.register('#/standings', async (container) => {
                                 <td><strong>${s.team_name}</strong></td>
                                 <td>${s.display_name}</td>
                                 <td style="font-weight:700;color:var(--accent-teal);text-align:right">${pts}</td>
-                                ${isGeneral ? `<td class="money" style="text-align:right">${formatMoney(s.budget)}</td>` : ''}
                             </tr>`;
                         }).join('')}
-                        ${sorted.length === 0 ? '<tr><td colspan="5" class="text-center" style="color:var(--text-muted)">Sin datos todavía</td></tr>' : ''}
+                        ${sorted.length === 0 ? '<tr><td colspan="4" class="text-center" style="color:var(--text-muted)">Sin datos todavía</td></tr>' : ''}
                     </tbody>
                 </table>
             </div>
