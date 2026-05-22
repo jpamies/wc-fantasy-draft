@@ -77,6 +77,8 @@ Router.register('#/draft', async (container) => {
                 country_code: p.country_code || '',
                 club: p.club || '',
             }));
+            const myPosCounts = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+            myPicks.forEach(p => { if (myPosCounts[p.position] !== undefined) myPosCounts[p.position] += 1; });
 
         container.innerHTML = `
             <div class="flex-between mb-2">
@@ -128,7 +130,7 @@ Router.register('#/draft', async (container) => {
                             </div>
                         </div>
                         <div id="player-list" style="max-height:500px;overflow-y:auto">
-                            ${renderPlayerList(availablePlayers, myTurn && !isDone, !isDone)}
+                            ${renderPlayerList(availablePlayers, myTurn && !isDone, !isDone, myPosCounts)}
                         </div>
                     </div>
                 </div>
@@ -188,10 +190,12 @@ Router.register('#/draft', async (container) => {
         bindEvents();
     }
 
-    function renderPlayerList(players, canPick, canQueue) {
+    function renderPlayerList(players, canPick, canQueue, myPosCounts = { GK: 0, DEF: 0, MID: 0, FWD: 0 }) {
         const queuedIds = new Set(draftQueue.map(p => p.id));
         return players.map(p => {
             const inQueue = queuedIds.has(p.id);
+            const atPosCap = (myPosCounts[p.position] || 0) >= 4;
+            const canQueueToggle = !atPosCap || inQueue;
             return `
             <div class="player-card draft-player-card" data-pid="${p.id}">
                 <div class="draft-player-top">
@@ -210,8 +214,8 @@ Router.register('#/draft', async (container) => {
                 </div>
                 ${(canQueue || canPick) ? `
                     <div class="draft-player-actions">
-                        ${canQueue ? `<button class="btn btn-sm ${inQueue ? 'btn-teal' : 'btn-outline'} queue-add-btn" data-pid="${p.id}" title="${inQueue ? 'En cola' : 'Añadir a cola'}">${inQueue ? '✓' : '+'}</button>` : ''}
-                        ${canPick ? `<button class="btn btn-primary btn-sm pick-btn" data-pid="${p.id}">Pick</button>` : ''}
+                        ${canQueue ? `<button class="btn btn-sm ${inQueue ? 'btn-teal' : 'btn-outline'} queue-add-btn" data-pid="${p.id}" title="${atPosCap && !inQueue ? 'Tope de posicion alcanzado (4)' : (inQueue ? 'En cola' : 'Añadir a cola')}" ${!canQueueToggle ? 'disabled' : ''}>${inQueue ? '✓' : '+'}</button>` : ''}
+                        ${canPick ? `<button class="btn btn-primary btn-sm pick-btn" data-pid="${p.id}" title="${atPosCap ? 'Tope de posicion alcanzado (4)' : ''}" ${atPosCap ? 'disabled' : ''}>${atPosCap ? 'Tope' : 'Pick'}</button>` : ''}
                     </div>
                 ` : ''}
             </div>`;
@@ -257,7 +261,11 @@ Router.register('#/draft', async (container) => {
             if (list) {
                 const myTurn = state.current_team_id === API.getTeamId();
                 const isDone = state.status === 'completed';
-                list.innerHTML = renderPlayerList(availablePlayers, myTurn && !isDone, !isDone);
+                const myTeamId = API.getTeamId();
+                const myPicks = (state.picks || []).filter(p => p.team_id === myTeamId);
+                const myPosCounts = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+                myPicks.forEach(p => { if (myPosCounts[p.position] !== undefined) myPosCounts[p.position] += 1; });
+                list.innerHTML = renderPlayerList(availablePlayers, myTurn && !isDone, !isDone, myPosCounts);
                 bindPickButtons();
                 bindQueueAddButtons();
             }
@@ -561,6 +569,8 @@ async function renderRepositionDraft(container, leagueId, windowId) {
         const myTurn = state.current_turn_team_id === teamId;
         const isDone = state.status === 'completed';
         const myPicksCount = (state.my_picks || []).filter(p => p.player_id).length;
+        const myPosCounts = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+        (team.players || []).forEach(p => { if (myPosCounts[p.position] !== undefined) myPosCounts[p.position] += 1; });
 
         container.innerHTML = `
             <div class="flex-between mb-2">
@@ -609,7 +619,7 @@ async function renderRepositionDraft(container, leagueId, windowId) {
                             </div>
                         </div>
                         <div id="repo-player-list" style="max-height:500px;overflow-y:auto">
-                            ${renderRepoPlayerList(players, myTurn && !isDone)}
+                            ${renderRepoPlayerList(players, myTurn && !isDone, myPosCounts)}
                         </div>
                     </div>
                 </div>
@@ -659,7 +669,7 @@ async function renderRepositionDraft(container, leagueId, windowId) {
         bindRepoEvents();
     }
 
-    function renderRepoPlayerList(list, canPick) {
+    function renderRepoPlayerList(list, canPick, myPosCounts = { GK: 0, DEF: 0, MID: 0, FWD: 0 }) {
         if (!list.length) {
             return '<div class="text-center" style="color:var(--text-muted);padding:2rem">Sin jugadores disponibles</div>';
         }
@@ -673,7 +683,7 @@ async function renderRepositionDraft(container, leagueId, windowId) {
                 ${posBadge(p.position)}
                 <span style="font-size:.8rem;color:var(--accent-teal);font-weight:600;min-width:36px;text-align:right" title="Puntos fantasy">${p.total_points || 0} pts</span>
                 <div class="player-value">${formatMoney(p.market_value || 0)}</div>
-                ${canPick ? `<button class="btn btn-primary btn-sm repo-pick-btn" data-pid="${p.id}">Pick</button>` : ''}
+                ${canPick ? `<button class="btn btn-primary btn-sm repo-pick-btn" data-pid="${p.id}" title="${(myPosCounts[p.position] || 0) >= 4 ? 'Tope de posicion alcanzado (4)' : ''}" ${(myPosCounts[p.position] || 0) >= 4 ? 'disabled' : ''}>${(myPosCounts[p.position] || 0) >= 4 ? 'Tope' : 'Pick'}</button>` : ''}
             </div>
         `).join('');
     }
@@ -714,7 +724,9 @@ async function renderRepositionDraft(container, leagueId, windowId) {
             if (list) {
                 const myTurn = state.current_turn_team_id === teamId;
                 const isDone = state.status === 'completed';
-                list.innerHTML = renderRepoPlayerList(players, myTurn && !isDone);
+                const myPosCounts = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+                (team.players || []).forEach(p => { if (myPosCounts[p.position] !== undefined) myPosCounts[p.position] += 1; });
+                list.innerHTML = renderRepoPlayerList(players, myTurn && !isDone, myPosCounts);
                 container.querySelectorAll('.repo-pick-btn').forEach(btn => {
                     btn.addEventListener('click', async () => {
                         btn.disabled = true; btn.textContent = '...';

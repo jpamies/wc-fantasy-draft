@@ -198,6 +198,27 @@ class DraftEngine:
             if max(current_count, squad_count) >= SQUAD_SIZE:
                 return {"error": "Team already full"}
 
+            # Enforce per-position cap during draft picks.
+            pos_rows = await db.execute_fetchall(
+                """SELECT p.position, COUNT(*)::int as cnt
+                   FROM team_players tp
+                   JOIN players p ON p.id = tp.player_id
+                   WHERE tp.team_id=$1
+                   GROUP BY p.position""",
+                (team_id,),
+            )
+            pos_counts = {"GK": 0, "DEF": 0, "MID": 0, "FWD": 0}
+            for row in pos_rows:
+                pos = row["position"]
+                if pos in pos_counts:
+                    pos_counts[pos] = row["cnt"]
+
+            player_pos = player.get("position")
+            if player_pos in SQUAD_TARGETS:
+                pos_max = SQUAD_TARGETS[player_pos][1]
+                if pos_counts.get(player_pos, 0) >= pos_max:
+                    return {"error": f"Position cap reached ({pos_max} {player_pos})"}
+
             now = datetime.now(timezone.utc).isoformat()
             await db.execute(
                 "INSERT INTO draft_picks (draft_id, round, pick, team_id, player_id, timestamp) VALUES ($1,$2,$3,$4,$5,$6)",
