@@ -10,7 +10,7 @@ from src.backend.config import settings
 _use_simulator = bool(settings.SIMULATOR_API_URL)
 
 # Squad composition targets for autodraft (12-player squad)
-SQUAD_TARGETS = {"GK": (1, 2), "DEF": (2, 4), "MID": (2, 4), "FWD": (1, 3)}  # (min, max)
+SQUAD_TARGETS = {"GK": (1, 4), "DEF": (2, 4), "MID": (2, 4), "FWD": (1, 4)}  # (min, max)
 SQUAD_SIZE = 12
 LINEUP_SIZE = 5
 LINEUP_STRUCTURE = {"GK": 1, "DEF": 1, "MID": 1, "FWD": 1, "WILDCARD": 1}

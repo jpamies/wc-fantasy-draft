@@ -532,7 +532,7 @@ async def process_reposition_autodraft(window_id: int, max_iterations: int = 100
             finally:
                 await db.close()
 
-            POS_MAX = {"GK": 3, "DEF": 8, "MID": 8, "FWD": 8}
+            POS_MAX = {"GK": 4, "DEF": 4, "MID": 4, "FWD": 4}
             chosen = None
             for p in available:
                 if pos_counts.get(p["position"], 0) < POS_MAX.get(p["position"], 99):

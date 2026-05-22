@@ -173,7 +173,7 @@ Router.register('#/draft', async (container) => {
                             const pp = myPicks.filter(p => p.position === pos);
                             if (!pp.length) return '';
                             return `<div style="margin-bottom:.5rem">
-                                <small style="color:var(--text-muted)">${pos} (${pp.length})</small>
+                                <small style="color:var(--text-muted)">${pos} (${pp.length}/4)</small>
                                 ${pp.map(p => `<div style="font-size:.8rem;padding:.15rem 0;display:flex;align-items:center;gap:.4rem">
                                     ${posBadge(pos)} <span>${p.name}</span> <span style="color:var(--text-muted);font-size:.75rem">${p.country_code}</span>
                                 </div>`).join('')}
@@ -641,7 +641,7 @@ async function renderRepositionDraft(container, leagueId, windowId) {
                         <div class="card-header">Mi plantilla (${(team.players || []).length}/12)</div>
                         ${['GK','DEF','MID','FWD'].map(pos => {
                             const pp = (team.players || []).filter(p => p.position === pos);
-                            const cap = {GK:2, DEF:4, MID:4, FWD:3}[pos];
+                            const cap = {GK:4, DEF:4, MID:4, FWD:4}[pos];
                             return `<div style="margin-bottom:.5rem">
                                 <small style="color:var(--text-muted)">${pos} (${pp.length}/${cap})</small>
                                 ${pp.map(p => `<div style="font-size:.78rem;padding:.1rem 0;display:flex;align-items:center;gap:.4rem">

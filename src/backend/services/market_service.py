@@ -1435,6 +1435,24 @@ class MarketService:
                 )
                 if not player:
                     return {"success": False, "reason": "Player not found"}
+                player_pos = player[0]["position"]
+
+                # Enforce position cap in reposition draft.
+                position_caps = {"GK": 4, "DEF": 4, "MID": 4, "FWD": 4}
+                if player_pos in position_caps:
+                    pos_count_rows = await db.execute_fetchall(
+                        """SELECT COUNT(*)::int as cnt
+                           FROM team_players tp
+                           JOIN players p ON p.id = tp.player_id
+                           WHERE tp.team_id=$1 AND p.position=$2""",
+                        (team_id, player_pos),
+                    )
+                    pos_count = pos_count_rows[0]["cnt"] if pos_count_rows else 0
+                    if pos_count >= position_caps[player_pos]:
+                        return {
+                            "success": False,
+                            "reason": f"Position cap reached ({position_caps[player_pos]} {player_pos})",
+                        }
 
                 # Verify player is not already on a team in this league
                 window = await MarketService.get_market_window(window_id)
