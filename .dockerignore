@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+.git
+.gitignore
+docs/
+presentations/
+tests/
+.venv
+*.md
+.vscode
+data/players/
+data/scoring/
+data/tournaments/
+*.db

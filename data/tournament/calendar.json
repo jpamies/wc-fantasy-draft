@@ -1,0 +1,89 @@
+[
+  {
+    "id": "GS1",
+    "name": "Jornada 1 — Fase de Grupos",
+    "phase": "groups",
+    "date": "2026-06-11",
+    "matches": [
+      {"id": "GS1-A1", "home": "USA", "away": "EGY", "kickoff": "2026-06-11T18:00Z"},
+      {"id": "GS1-A2", "home": "MEX", "away": "COL", "kickoff": "2026-06-11T21:00Z"},
+      {"id": "GS1-B1", "home": "ESP", "away": "CRO", "kickoff": "2026-06-12T15:00Z"},
+      {"id": "GS1-B2", "home": "JPN", "away": "MAR", "kickoff": "2026-06-12T18:00Z"},
+      {"id": "GS1-C1", "home": "FRA", "away": "SEN", "kickoff": "2026-06-12T21:00Z"},
+      {"id": "GS1-C2", "home": "ARG", "away": "TUR", "kickoff": "2026-06-13T18:00Z"},
+      {"id": "GS1-D1", "home": "ENG", "away": "QAT", "kickoff": "2026-06-13T21:00Z"},
+      {"id": "GS1-D2", "home": "BRA", "away": "SUI", "kickoff": "2026-06-14T18:00Z"},
+      {"id": "GS1-E1", "home": "GER", "away": "POR", "kickoff": "2026-06-14T21:00Z"},
+      {"id": "GS1-E2", "home": "URU", "away": "DEN", "kickoff": "2026-06-15T18:00Z"},
+      {"id": "GS1-F1", "home": "ITA", "away": "BEL", "kickoff": "2026-06-15T21:00Z"},
+      {"id": "GS1-F2", "home": "NED", "away": "ITA", "kickoff": "2026-06-15T21:00Z"}
+    ]
+  },
+  {
+    "id": "GS2",
+    "name": "Jornada 2 — Fase de Grupos",
+    "phase": "groups",
+    "date": "2026-06-18",
+    "matches": [
+      {"id": "GS2-A1", "home": "EGY", "away": "MEX", "kickoff": "2026-06-18T18:00Z"},
+      {"id": "GS2-A2", "home": "COL", "away": "USA", "kickoff": "2026-06-18T21:00Z"},
+      {"id": "GS2-B1", "home": "CRO", "away": "JPN", "kickoff": "2026-06-19T15:00Z"},
+      {"id": "GS2-B2", "home": "MAR", "away": "ESP", "kickoff": "2026-06-19T18:00Z"},
+      {"id": "GS2-C1", "home": "SEN", "away": "ARG", "kickoff": "2026-06-19T21:00Z"},
+      {"id": "GS2-C2", "home": "TUR", "away": "FRA", "kickoff": "2026-06-20T18:00Z"},
+      {"id": "GS2-D1", "home": "QAT", "away": "BRA", "kickoff": "2026-06-20T21:00Z"},
+      {"id": "GS2-D2", "home": "SUI", "away": "ENG", "kickoff": "2026-06-21T18:00Z"},
+      {"id": "GS2-E1", "home": "POR", "away": "URU", "kickoff": "2026-06-21T21:00Z"},
+      {"id": "GS2-E2", "home": "DEN", "away": "GER", "kickoff": "2026-06-22T18:00Z"},
+      {"id": "GS2-F1", "home": "BEL", "away": "NED", "kickoff": "2026-06-22T21:00Z"}
+    ]
+  },
+  {
+    "id": "GS3",
+    "name": "Jornada 3 — Fase de Grupos",
+    "phase": "groups",
+    "date": "2026-06-25",
+    "matches": [
+      {"id": "GS3-A1", "home": "USA", "away": "COL", "kickoff": "2026-06-25T18:00Z"},
+      {"id": "GS3-A2", "home": "EGY", "away": "MEX", "kickoff": "2026-06-25T18:00Z"},
+      {"id": "GS3-B1", "home": "CRO", "away": "MAR", "kickoff": "2026-06-26T18:00Z"},
+      {"id": "GS3-B2", "home": "ESP", "away": "JPN", "kickoff": "2026-06-26T18:00Z"},
+      {"id": "GS3-C1", "home": "TUR", "away": "SEN", "kickoff": "2026-06-27T18:00Z"},
+      {"id": "GS3-C2", "home": "FRA", "away": "ARG", "kickoff": "2026-06-27T18:00Z"},
+      {"id": "GS3-D1", "home": "SUI", "away": "QAT", "kickoff": "2026-06-28T18:00Z"},
+      {"id": "GS3-D2", "home": "ENG", "away": "BRA", "kickoff": "2026-06-28T18:00Z"},
+      {"id": "GS3-E1", "home": "DEN", "away": "POR", "kickoff": "2026-06-29T18:00Z"},
+      {"id": "GS3-E2", "home": "GER", "away": "URU", "kickoff": "2026-06-29T18:00Z"},
+      {"id": "GS3-F1", "home": "ITA", "away": "NED", "kickoff": "2026-06-30T18:00Z"},
+      {"id": "GS3-F2", "home": "BEL", "away": "ITA", "kickoff": "2026-06-30T18:00Z"}
+    ]
+  },
+  {
+    "id": "R16",
+    "name": "Octavos de Final",
+    "phase": "r16",
+    "date": "2026-07-01",
+    "matches": []
+  },
+  {
+    "id": "QF",
+    "name": "Cuartos de Final",
+    "phase": "quarter",
+    "date": "2026-07-05",
+    "matches": []
+  },
+  {
+    "id": "SF",
+    "name": "Semifinales",
+    "phase": "semi",
+    "date": "2026-07-09",
+    "matches": []
+  },
+  {
+    "id": "FINAL",
+    "name": "Final",
+    "phase": "final",
+    "date": "2026-07-19",
+    "matches": []
+  }
+]
