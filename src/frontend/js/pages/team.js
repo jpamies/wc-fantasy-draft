@@ -235,6 +235,12 @@ Router.register('#/team', async (container) => {
             LINEUP_SLOTS.forEach(slot => {
                 currentLineup[slot] = nextLineup[slot] || null;
             });
+
+            // Auto-select captain from current starters using the same strength heuristic.
+            const autoCaptain = Object.values(nextLineup)
+                .filter(Boolean)
+                .sort((left, right) => playerScore(right) - playerScore(left))[0] || null;
+            currentCaptainId = autoCaptain?.player_id || null;
         };
 
         const buildSpec = () => {
