@@ -34,8 +34,39 @@ Router.register('#/draft', async (container) => {
     let pollTimer = null;
     let alive = true;
     let lastPickCount = state.picks ? state.picks.length : 0;
+    let lastNotifiedPickCount = lastPickCount;
+    let lastNotifiedTurnKey = '';
     let autodraftEnabled = false;
     let draftQueue = []; // [{id, name, position, ...}, ...]
+    const notificationPrefKey = 'wcf_browser_notifications_enabled';
+    let browserNotificationsEnabled = localStorage.getItem(notificationPrefKey) === 'true' && getBrowserNotificationPermission() === 'granted';
+
+    function shouldNotifyBrowser() {
+        return browserNotificationsEnabled && supportsBrowserNotifications() && getBrowserNotificationPermission() === 'granted';
+    }
+
+    function maybeNotifyTurn(stateToCheck) {
+        if (!stateToCheck || stateToCheck.status !== 'in_progress') return;
+        if (stateToCheck.current_team_id !== API.getTeamId()) return;
+        if (!shouldNotifyBrowser()) return;
+        const turnKey = `${stateToCheck.current_team_id}:${stateToCheck.current_round}:${stateToCheck.current_pick}`;
+        if (lastNotifiedTurnKey === turnKey) return;
+        lastNotifiedTurnKey = turnKey;
+        notifyBrowser('WC Fantasy - te toca', {
+            body: `Es tu turno en el draft${stateToCheck.current_team_name ? `: ${stateToCheck.current_team_name}` : ''}`,
+            tag: `draft-turn-${leagueId}`,
+            data: { leagueId, type: 'turn', teamId: stateToCheck.current_team_id },
+        });
+    }
+
+    function maybeNotifyPick(pick) {
+        if (!pick || !shouldNotifyBrowser()) return;
+        notifyBrowser('WC Fantasy - nuevo pick', {
+            body: `${pick.team_name} eligió a ${pick.player_name}`,
+            tag: `draft-pick-${leagueId}`,
+            data: { leagueId, type: 'pick', pick },
+        });
+    }
 
     // Check initial autodraft + queue status
     try {
@@ -437,9 +468,16 @@ Router.register('#/draft', async (container) => {
                 await loadQueue();
                 render();
 
+                if (hadNewPick && newState.picks && newState.picks.length > lastNotifiedPickCount) {
+                    const latestPick = newState.picks[newState.picks.length - 1];
+                    maybeNotifyPick(latestPick);
+                    lastNotifiedPickCount = newPickCount;
+                }
+
                 // Notify if it became my turn
                 if (state.current_team_id === API.getTeamId() && state.status === 'in_progress') {
                     showToast('🔔 ¡Es tu turno!', 'success');
+                    maybeNotifyTurn(state);
                 }
             }
         } catch (err) {
@@ -476,9 +514,12 @@ Router.register('#/draft', async (container) => {
 
                             if (msg.type === 'pick' && msg.pick) {
                                 showToast(`${msg.pick.team_name} eligió a ${msg.pick.player_name}`, 'info');
+                                maybeNotifyPick(msg.pick);
+                                lastNotifiedPickCount = newPickCount;
                             }
                             if (state.current_team_id === API.getTeamId() && state.status === 'in_progress') {
                                 showToast('🔔 ¡Es tu turno!', 'success');
+                                maybeNotifyTurn(state);
                             }
                             if (msg.type === 'draft_end') {
                                 showToast('🏆 ¡Draft completado!', 'success');

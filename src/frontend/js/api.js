@@ -83,6 +83,39 @@ function showToast(msg, type = 'info') {
     setTimeout(() => t.remove(), 4000);
 }
 
+function supportsBrowserNotifications() {
+    return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+function getBrowserNotificationPermission() {
+    return supportsBrowserNotifications() ? window.Notification.permission : 'unsupported';
+}
+
+async function requestBrowserNotifications() {
+    if (!supportsBrowserNotifications()) return 'unsupported';
+    if (window.Notification.permission === 'granted') return 'granted';
+    return await window.Notification.requestPermission();
+}
+
+function notifyBrowser(title, options = {}) {
+    if (!supportsBrowserNotifications()) return false;
+    if (window.Notification.permission !== 'granted') return false;
+    const payload = {
+        tag: options.tag,
+        renotify: options.renotify ?? true,
+        silent: options.silent ?? false,
+        data: options.data || {},
+        body: options.body || '',
+    };
+    if (options.icon) payload.icon = options.icon;
+    try {
+        new window.Notification(title, payload);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function showModal(html) {
     document.getElementById('modal-content').innerHTML = html;
     document.getElementById('modal-overlay').classList.remove('hidden');

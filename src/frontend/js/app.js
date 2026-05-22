@@ -20,6 +20,7 @@ window.clerkReady = (async function initClerk() {
 })();
 
 (async function() {
+    const notificationPrefKey = 'wcf_browser_notifications_enabled';
 
     async function loadRuntimeVersion() {
         const el = document.getElementById('app-version');
@@ -72,6 +73,42 @@ window.clerkReady = (async function initClerk() {
                 navLinks.appendChild(a);
             }
         }
+
+            const notifBtn = document.getElementById('btn-notifications');
+            if (notifBtn) {
+                const syncNotificationButton = () => {
+                    if (!supportsBrowserNotifications()) {
+                        notifBtn.style.display = 'none';
+                        return;
+                    }
+                    notifBtn.style.display = 'inline-flex';
+                    const permission = getBrowserNotificationPermission();
+                    const enabled = permission === 'granted' && localStorage.getItem(notificationPrefKey) === 'true';
+                    notifBtn.textContent = enabled ? '🔔 ON' : permission === 'denied' ? '🔕 BLOQUEADAS' : '🔔 OFF';
+                    notifBtn.classList.toggle('btn-gold', enabled);
+                    notifBtn.classList.toggle('btn-outline', !enabled);
+                };
+
+                syncNotificationButton();
+                notifBtn.addEventListener('click', async () => {
+                    if (!supportsBrowserNotifications()) {
+                        showToast('Tu navegador no soporta notificaciones', 'error');
+                        return;
+                    }
+                    const permission = await requestBrowserNotifications();
+                    const enabled = permission === 'granted';
+                    localStorage.setItem(notificationPrefKey, String(enabled));
+                    syncNotificationButton();
+                    if (enabled) {
+                        showToast('Notificaciones activadas en el navegador', 'success');
+                        notifyBrowser('WC Fantasy', { body: 'Notificaciones activadas', tag: 'global-notifications' });
+                    } else if (permission === 'denied') {
+                        showToast('Notificaciones bloqueadas por el navegador', 'error');
+                    } else {
+                        showToast('Notificaciones no activadas', 'info');
+                    }
+                });
+            }
     }
 
     // Logout — sign out of both Clerk and our app
