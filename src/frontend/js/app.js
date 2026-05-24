@@ -26,6 +26,82 @@ window.clerkReady = (async function initClerk() {
     const lineupWarningPrefix = 'wcf_notif_lineup_warning';
     let playerNotifTimer = null;
 
+    function supportsWebPush() {
+        return (
+            typeof window !== 'undefined'
+            && 'serviceWorker' in navigator
+            && 'PushManager' in window
+        );
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+
+    async function getPushPublicKey() {
+        try {
+            return await API.get('/notifications/push/public-key');
+        } catch {
+            return { enabled: false, public_key: '' };
+        }
+    }
+
+    async function ensurePushSubscription() {
+        if (!supportsWebPush()) return { ok: false, reason: 'unsupported' };
+
+        const keyInfo = await getPushPublicKey();
+        if (!keyInfo?.enabled || !keyInfo?.public_key) {
+            return { ok: false, reason: 'push-disabled-server' };
+        }
+
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        let subscription = await registration.pushManager.getSubscription();
+
+        if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(keyInfo.public_key),
+            });
+        }
+
+        await API.post('/notifications/push/subscribe', {
+            subscription: subscription.toJSON(),
+        });
+
+        return { ok: true };
+    }
+
+    async function disablePushSubscription() {
+        if (!supportsWebPush()) return;
+        try {
+            const registration = await navigator.serviceWorker.getRegistration('/');
+            const subscription = registration ? await registration.pushManager.getSubscription() : null;
+            if (subscription) {
+                await API.post('/notifications/push/unsubscribe', { endpoint: subscription.endpoint });
+                await subscription.unsubscribe();
+            } else {
+                await API.post('/notifications/push/unsubscribe', { endpoint: null });
+            }
+        } catch {
+            // Keep browser setting as source of truth even if unsubscribe fails remotely.
+        }
+    }
+
+    async function sendPushTest() {
+        try {
+            await API.post('/notifications/push/test', {});
+        } catch {
+            // If server push is not configured yet, browser notifications still work.
+        }
+    }
+
     function browserNotificationsEnabled() {
         return supportsBrowserNotifications()
             && getBrowserNotificationPermission() === 'granted'
@@ -214,6 +290,17 @@ window.clerkReady = (async function initClerk() {
 
                 syncNotificationButton();
                 notifBtn.addEventListener('click', async () => {
+                    const permissionNow = getBrowserNotificationPermission();
+                    const currentlyEnabled = permissionNow === 'granted' && localStorage.getItem(notificationPrefKey) === 'true';
+
+                    if (currentlyEnabled) {
+                        localStorage.setItem(notificationPrefKey, 'false');
+                        await disablePushSubscription();
+                        syncNotificationButton();
+                        showToast('Notificaciones desactivadas', 'info');
+                        return;
+                    }
+
                     if (!supportsBrowserNotifications()) {
                         showToast('Tu navegador no soporta notificaciones', 'error');
                         return;
@@ -225,6 +312,8 @@ window.clerkReady = (async function initClerk() {
                     if (enabled) {
                         showToast('Notificaciones activadas en el navegador', 'success');
                         notifyBrowser('WC Fantasy', { body: 'Notificaciones activadas', tag: 'global-notifications' });
+                        await ensurePushSubscription();
+                        await sendPushTest();
                         checkMyPlayersNotifications();
                     } else if (permission === 'denied') {
                         showToast('Notificaciones bloqueadas por el navegador', 'error');

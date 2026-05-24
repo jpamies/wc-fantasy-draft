@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     SIMULATOR_API_URL: str = ""
     CORS_ORIGINS: str = "*"
     JWT_ALGORITHM: str = "HS256"
+    PUSH_VAPID_PUBLIC_KEY: str = ""
+    PUSH_VAPID_PRIVATE_KEY: str = ""
+    PUSH_VAPID_SUBJECT: str = "mailto:admin@fantasy.jpamies.com"
 
     model_config = {"env_prefix": "WCF_"}
 

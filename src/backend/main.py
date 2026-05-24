@@ -9,7 +9,7 @@ from starlette.requests import Request
 
 from src.backend.database import init_db
 from src.backend.config import settings
-from src.backend.routes import leagues, players, teams, draft, market, scoring
+from src.backend.routes import leagues, players, teams, draft, market, scoring, notifications
 
 
 APP_VERSION = os.getenv("WCF_APP_VERSION", "1.0.0")
@@ -426,6 +426,7 @@ app.include_router(teams.router)
 app.include_router(draft.router)
 app.include_router(market.router)
 app.include_router(scoring.router)
+app.include_router(notifications.router)
 
 
 @app.get("/api/v1/health")

@@ -12,7 +12,8 @@ Requirements:
 - The user session is logged in and has a valid team.
 
 Important limitation:
-- This is not Web Push yet. The browser must have an active app tab/process to receive polling-based updates.
+- Matchday player events still use frontend polling every 45s.
+- Web Push delivery requires VAPID keys configured on backend.
 
 ## Implemented Events
 
@@ -20,10 +21,22 @@ Important limitation:
 
 Source:
 - Draft WebSocket events in frontend draft page.
+- Backend Web Push hook on draft turn changes.
 
 Events:
 - Your turn in draft.
 - New pick in draft.
+
+### Web Push Transport
+
+Implemented:
+- Service Worker at `/sw.js`.
+- Browser push subscription lifecycle (subscribe/unsubscribe) from the global `🔔` button.
+- Backend subscription storage and test push endpoint.
+
+Current usage:
+- Push test is sent when enabling notifications.
+- Real background push for draft turn events is active.
 
 ### Matchday Player Events (New)
 
@@ -61,8 +74,28 @@ From `lineup-5` response (starters):
 - Reopening the app during an already active matchday creates a fresh baseline for that browser session state.
 - Lineup incomplete warning is emitted once per team + matchday in local browser storage.
 
+## Backend Setup (Web Push)
+
+Required environment variables:
+- `WCF_PUSH_VAPID_PUBLIC_KEY`
+- `WCF_PUSH_VAPID_PRIVATE_KEY`
+- `WCF_PUSH_VAPID_SUBJECT` (example: `mailto:admin@fantasy.jpamies.com`)
+
+When these are missing:
+- App keeps working with in-tab notifications.
+- Push subscription endpoints return disabled state.
+
+Suggested key generation:
+- Generate VAPID keys once and store them in Kubernetes secrets/env vars.
+
+API endpoints:
+- `GET /api/v1/notifications/push/public-key`
+- `POST /api/v1/notifications/push/subscribe`
+- `POST /api/v1/notifications/push/unsubscribe`
+- `POST /api/v1/notifications/push/test`
+
 ## Future Improvements
 
-- Web Push with Service Worker for true background/mobile push.
+- Hook Web Push sending into draft/market/scoring backend events (true background delivery for all categories).
 - Notification preferences by category (draft, points, market, lineup lock).
 - Backend event stream (single source of truth) to reduce polling.

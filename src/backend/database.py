@@ -328,6 +328,24 @@ CREATE INDEX IF NOT EXISTS idx_clause_attempts_status ON clause_attempts(status)
 CREATE INDEX IF NOT EXISTS idx_reposition_picks_market ON reposition_draft_picks(market_window_id);
 CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(team_id);
 CREATE INDEX IF NOT EXISTS idx_news_events_league ON news_events(league_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id SERIAL PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES fantasy_teams(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh_key TEXT NOT NULL,
+    auth_key TEXT NOT NULL,
+    user_agent TEXT,
+    is_active INTEGER DEFAULT 1,
+    failure_count INTEGER DEFAULT 0,
+    last_success_at TEXT,
+    last_failure_at TEXT,
+    created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_team ON push_subscriptions(team_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
 """
 
 
@@ -520,6 +538,31 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_reposition_picks_team ON reposition_draft_picks(team_id)"
         )
 
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id SERIAL PRIMARY KEY,
+                team_id TEXT NOT NULL REFERENCES fantasy_teams(id) ON DELETE CASCADE,
+                endpoint TEXT NOT NULL UNIQUE,
+                p256dh_key TEXT NOT NULL,
+                auth_key TEXT NOT NULL,
+                user_agent TEXT,
+                is_active INTEGER DEFAULT 1,
+                failure_count INTEGER DEFAULT 0,
+                last_success_at TEXT,
+                last_failure_at TEXT,
+                created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS'),
+                updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_team ON push_subscriptions(team_id, is_active)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint)"
+        )
+
         # Ensure lineup schema exists on pre-existing databases.
         await conn.execute(
             """
@@ -660,6 +703,13 @@ async def init_db():
                     ALTER TABLE matchday_lineups DROP CONSTRAINT IF EXISTS matchday_lineups_team_id_fkey;
                     ALTER TABLE matchday_lineups
                         ADD CONSTRAINT matchday_lineups_team_id_fkey
+                        FOREIGN KEY (team_id) REFERENCES fantasy_teams(id) ON DELETE CASCADE;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'push_subscriptions') THEN
+                    ALTER TABLE push_subscriptions DROP CONSTRAINT IF EXISTS push_subscriptions_team_id_fkey;
+                    ALTER TABLE push_subscriptions
+                        ADD CONSTRAINT push_subscriptions_team_id_fkey
                         FOREIGN KEY (team_id) REFERENCES fantasy_teams(id) ON DELETE CASCADE;
                 END IF;
 

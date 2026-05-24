@@ -3,6 +3,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from src.backend.auth import get_current_team
 from src.backend.services.draft_engine import DraftEngine
+from src.backend.services.push_service import send_push_to_team
 from src.backend.models import DraftPickRequest, DraftState
 
 router = APIRouter(prefix="/api/v1", tags=["draft"])
@@ -39,6 +40,24 @@ async def _broadcast(league_id: str, message: dict):
             dead.append(ws)
     for ws in dead:
         conns.remove(ws)
+
+
+def _schedule_turn_push(league_id: str, state: dict | None):
+    if not state or state.get("status") != "in_progress":
+        return
+    team_id = state.get("current_team_id")
+    if not team_id:
+        return
+    team_name = state.get("current_team_name") or "Tu equipo"
+    asyncio.create_task(
+        send_push_to_team(
+            team_id=team_id,
+            title="WC Fantasy - te toca",
+            body=f"Es tu turno en el draft: {team_name}",
+            data={"type": "draft-turn", "league_id": league_id, "url": "/#/draft"},
+            tag=f"draft-turn-{league_id}",
+        )
+    )
 
 
 @router.post("/leagues/{league_id}/draft/start")
@@ -90,6 +109,7 @@ async def make_pick(league_id: str, body: DraftPickRequest, auth: dict = Depends
         "pick": result,
         "state": state,
     })
+    _schedule_turn_push(league_id, state)
 
     # Process any autodraft teams that are next in line
     _schedule_autodraft(league_id)
@@ -106,6 +126,7 @@ async def auto_pick(league_id: str, auth: dict = Depends(get_current_team)):
         raise HTTPException(400, result["error"])
     state = await DraftEngine.get_draft_state(league_id)
     await _broadcast(league_id, {"type": "pick", "pick": result, "state": state})
+    _schedule_turn_push(league_id, state)
 
     # Process any autodraft teams that are next in line
     _schedule_autodraft(league_id)
@@ -264,6 +285,7 @@ async def _process_and_broadcast_autodraft(league_id: str):
                     "state": state,
                     "autodraft": True,
                 })
+                _schedule_turn_push(league_id, state)
                 # Realistic delay between bot picks (also keeps the event loop
                 # responsive for HTTP/WebSocket traffic).
                 await asyncio.sleep(1.0)
