@@ -56,6 +56,8 @@ def _schedule_turn_push(league_id: str, state: dict | None):
             body=f"Es tu turno en el draft: {team_name}",
             data={"type": "draft-turn", "league_id": league_id, "url": "/#/draft"},
             tag=f"draft-turn-{league_id}",
+            icon="https://cdn-icons-png.flaticon.com/512/1200/1200792.png",
+            badge="https://cdn-icons-png.flaticon.com/512/1200/1200792.png",
         )
     )
 

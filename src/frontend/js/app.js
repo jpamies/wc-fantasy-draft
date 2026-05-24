@@ -120,7 +120,7 @@ window.clerkReady = (async function initClerk() {
             const previousActiveId = localStorage.getItem(activeMatchdayKey);
 
             if (active && previousActiveId !== active.id) {
-                notifyBrowser('WC Fantasy - jornada en directo', {
+                notifyImportant('WC Fantasy - jornada en directo', {
                     body: `Ha comenzado ${active.name || active.id}`,
                     tag: `matchday-start-${active.id}`,
                     data: { type: 'matchday-start', matchday: active.id },
@@ -130,7 +130,7 @@ window.clerkReady = (async function initClerk() {
             if (!active && previousActiveId) {
                 const previous = (matchdays || []).find(md => md.id === previousActiveId);
                 if (previous && previous.status === 'completed') {
-                    notifyBrowser('WC Fantasy - jornada finalizada', {
+                    notifyImportant('WC Fantasy - jornada finalizada', {
                         body: `${previous.name || previous.id} ha terminado`,
                         tag: `matchday-end-${previous.id}`,
                         data: { type: 'matchday-end', matchday: previous.id },
@@ -149,7 +149,7 @@ window.clerkReady = (async function initClerk() {
             const warningKey = `${lineupWarningPrefix}:${teamId}:${active.id}`;
 
             if (starters.length < 5 && localStorage.getItem(warningKey) !== '1') {
-                notifyBrowser('WC Fantasy - alineacion incompleta', {
+                notifyImportant('WC Fantasy - alineacion incompleta', {
                     body: `Tienes ${starters.length}/5 titulares para ${active.name || active.id}`,
                     tag: `lineup-incomplete-${active.id}`,
                     data: { type: 'lineup-incomplete', matchday: active.id, starters: starters.length },
@@ -182,7 +182,7 @@ window.clerkReady = (async function initClerk() {
                 if (!hadPrevious || !prev) continue;
 
                 if (!prev.country_played && currPlayed) {
-                    notifyBrowser('WC Fantasy - jugador en juego', {
+                    notifyImportant('WC Fantasy - jugador en juego', {
                         body: `${p.name} ya ha empezado su partido`,
                         tag: `player-live-${active.id}-${p.player_id}`,
                         data: { type: 'player-live', matchday: active.id, player_id: p.player_id },
@@ -192,14 +192,14 @@ window.clerkReady = (async function initClerk() {
                 const prevPoints = Number(prev.matchday_points || 0);
                 if (currPoints > prevPoints) {
                     const delta = currPoints - prevPoints;
-                    notifyBrowser('WC Fantasy - puntos para tu equipo', {
+                    notifyImportant('WC Fantasy - puntos para tu equipo', {
                         body: `${p.name}: +${delta} pts (total jornada: ${currPoints})`,
                         tag: `player-points-${active.id}-${p.player_id}-${currPoints}`,
                         data: { type: 'player-points', matchday: active.id, player_id: p.player_id, delta },
                     });
                 } else if (currPoints < prevPoints) {
                     const delta = currPoints - prevPoints;
-                    notifyBrowser('WC Fantasy - ajuste de puntos', {
+                    notifyImportant('WC Fantasy - ajuste de puntos', {
                         body: `${p.name}: ${delta} pts (total jornada: ${currPoints})`,
                         tag: `player-points-adjust-${active.id}-${p.player_id}-${currPoints}`,
                         data: { type: 'player-points-adjust', matchday: active.id, player_id: p.player_id, delta },

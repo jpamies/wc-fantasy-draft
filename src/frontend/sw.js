@@ -7,10 +7,13 @@ self.addEventListener('push', event => {
     }
 
     const title = payload.title || 'WC Fantasy';
+    const defaultIcon = 'https://cdn-icons-png.flaticon.com/512/1200/1200792.png';
     const options = {
         body: payload.body || '',
         tag: payload.tag || 'wc-fantasy-push',
         data: payload.data || {},
+        icon: payload.icon || defaultIcon,
+        badge: payload.badge || defaultIcon,
     };
 
     event.waitUntil(self.registration.showNotification(title, options));

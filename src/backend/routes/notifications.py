@@ -21,6 +21,15 @@ class PushUnsubscribeBody(BaseModel):
     endpoint: str | None = None
 
 
+class PushNotifyBody(BaseModel):
+    title: str
+    body: str = ""
+    tag: str | None = None
+    data: dict | None = None
+    icon: str | None = None
+    badge: str | None = None
+
+
 @router.get("/push/public-key")
 async def get_push_public_key(auth: dict = Depends(get_current_team)):
     if not auth.get("team_id"):
@@ -66,5 +75,24 @@ async def test_push(auth: dict = Depends(get_current_team)):
         body="Push de prueba enviado correctamente",
         data={"type": "push-test", "url": "/#/"},
         tag="push-test",
+        icon="https://cdn-icons-png.flaticon.com/512/1200/1200792.png",
+        badge="https://cdn-icons-png.flaticon.com/512/1200/1200792.png",
+    )
+    return {"ok": True, **result}
+
+
+@router.post("/push/notify")
+async def notify_push(body: PushNotifyBody, auth: dict = Depends(get_current_team)):
+    if not auth.get("team_id"):
+        raise HTTPException(403, "Not authenticated")
+
+    result = await send_push_to_team(
+        team_id=auth["team_id"],
+        title=(body.title or "WC Fantasy")[:120],
+        body=(body.body or "")[:240],
+        data=body.data or {},
+        tag=body.tag,
+        icon=body.icon,
+        badge=body.badge,
     )
     return {"ok": True, **result}

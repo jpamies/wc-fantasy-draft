@@ -52,7 +52,7 @@ Router.register('#/draft', async (container) => {
         const turnKey = `${stateToCheck.current_team_id}:${stateToCheck.current_round}:${stateToCheck.current_pick}`;
         if (lastNotifiedTurnKey === turnKey) return;
         lastNotifiedTurnKey = turnKey;
-        notifyBrowser('WC Fantasy - te toca', {
+        notifyImportant('WC Fantasy - te toca', {
             body: `Es tu turno en el draft${stateToCheck.current_team_name ? `: ${stateToCheck.current_team_name}` : ''}`,
             tag: `draft-turn-${leagueId}`,
             data: { leagueId, type: 'turn', teamId: stateToCheck.current_team_id },
@@ -61,7 +61,7 @@ Router.register('#/draft', async (container) => {
 
     function maybeNotifyPick(pick) {
         if (!pick || !shouldNotifyBrowser()) return;
-        notifyBrowser('WC Fantasy - nuevo pick', {
+        notifyImportant('WC Fantasy - nuevo pick', {
             body: `${pick.team_name} eligió a ${pick.player_name}`,
             tag: `draft-pick-${leagueId}`,
             data: { leagueId, type: 'pick', pick },

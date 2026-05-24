@@ -100,6 +100,7 @@ async function requestBrowserNotifications() {
 function notifyBrowser(title, options = {}) {
     if (!supportsBrowserNotifications()) return false;
     if (window.Notification.permission !== 'granted') return false;
+    const defaultIcon = 'https://cdn-icons-png.flaticon.com/512/1200/1200792.png';
     const payload = {
         tag: options.tag,
         renotify: options.renotify ?? true,
@@ -107,13 +108,38 @@ function notifyBrowser(title, options = {}) {
         data: options.data || {},
         body: options.body || '',
     };
-    if (options.icon) payload.icon = options.icon;
+    payload.icon = options.icon || defaultIcon;
+    if (options.badge) payload.badge = options.badge;
     try {
         new window.Notification(title, payload);
         return true;
     } catch {
         return false;
     }
+}
+
+async function notifyImportant(title, options = {}) {
+    const payload = {
+        title,
+        body: options.body || '',
+        tag: options.tag,
+        data: options.data || {},
+        icon: options.icon,
+        badge: options.badge,
+    };
+
+    try {
+        if (API.isLoggedIn()) {
+            const res = await API.post('/notifications/push/notify', payload);
+            if (res && !res.disabled && Number(res.sent || 0) > 0) {
+                return true;
+            }
+        }
+    } catch {
+        // If backend push is unavailable, fall back to browser notification.
+    }
+
+    return notifyBrowser(title, options);
 }
 
 function showModal(html) {

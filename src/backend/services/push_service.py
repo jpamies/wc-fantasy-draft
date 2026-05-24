@@ -63,7 +63,15 @@ async def deactivate_push_subscription(team_id: str, endpoint: str | None = None
         await db.close()
 
 
-async def send_push_to_team(team_id: str, title: str, body: str, data: dict | None = None, tag: str | None = None) -> dict:
+async def send_push_to_team(
+    team_id: str,
+    title: str,
+    body: str,
+    data: dict | None = None,
+    tag: str | None = None,
+    icon: str | None = None,
+    badge: str | None = None,
+) -> dict:
     if not push_enabled():
         return {"disabled": True, "sent": 0, "failed": 0}
 
@@ -86,6 +94,8 @@ async def send_push_to_team(team_id: str, title: str, body: str, data: dict | No
             "body": body,
             "tag": tag,
             "data": data or {},
+            "icon": icon,
+            "badge": badge,
         })
 
         sent = 0
